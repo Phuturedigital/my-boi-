@@ -239,25 +239,45 @@ function setListening(v) {
   micBtn.classList.toggle("listening", v);
 }
 
-async function listenOnce() {
+async function listenOnce(onInterim) {
   return new Promise((resolve, reject) => {
     if (!SR) return reject(new Error("speech-not-supported"));
     const rec = new SR();
     rec.continuous = false;
-    rec.interimResults = false;
+    rec.interimResults = true;
     rec.lang = "en-US";
 
-    let resolved = false;
+    let finalText = "";
     rec.onresult = (e) => {
-      resolved = true;
-      resolve(e.results[0][0].transcript);
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else interim += t;
+      }
+      if (onInterim) onInterim((finalText + interim).trim());
     };
     rec.onerror = (e) => reject(new Error(e.error));
     rec.onend = () => {
-      if (!resolved) reject(new Error("no-speech"));
+      if (finalText.trim()) resolve(finalText.trim());
+      else reject(new Error("no-speech"));
     };
     rec.start();
   });
+}
+
+/* ---------- Caption / talking bubble ---------- */
+
+const captionEl = document.getElementById("caption");
+
+function setCaption(who, text) {
+  if (!who || !text) {
+    captionEl.classList.remove("show", "user", "bot");
+    return;
+  }
+  captionEl.textContent = text;
+  captionEl.classList.remove("user", "bot");
+  captionEl.classList.add("show", who);
 }
 
 async function chat(text) {
@@ -273,76 +293,22 @@ async function chat(text) {
   return { reply, mood };
 }
 
-// Browser TTS. Uses device voices — free, no API.
-// Prefers South African English (Tessa on Apple devices), then any English.
-
-speechSynthesis.getVoices(); // kick off voice list loading
-
-async function ensureVoices() {
-  if (speechSynthesis.getVoices().length > 0) return;
-  await new Promise((resolve) => {
-    const done = () => {
-      speechSynthesis.removeEventListener("voiceschanged", done);
-      resolve();
-    };
-    speechSynthesis.addEventListener("voiceschanged", done);
-    setTimeout(done, 600);
-  });
-}
-
-function pickVoice() {
-  const voices = speechSynthesis.getVoices();
-  if (voices.length === 0) return null;
-  // Prefer local voices — remote ones silently fail if network is slow.
-  const local = voices.filter((v) => v.localService !== false);
-  const pool = local.length > 0 ? local : voices;
-  return (
-    pool.find((v) => v.lang === "en-ZA") ||
-    pool.find((v) => /tessa/i.test(v.name)) ||
-    pool.find((v) => /daniel|karen|moira|samantha/i.test(v.name) && v.lang.startsWith("en")) ||
-    pool.find((v) => v.lang.startsWith("en")) ||
-    pool[0]
-  );
-}
-
-// Chrome/Safari require a user-gesture-initiated speak() to unlock TTS for
-// the tab. Fire a silent utterance on first mic tap so async speaks later work.
-let speechPrimed = false;
-function primeSpeech() {
-  if (speechPrimed) return;
-  try {
-    const u = new SpeechSynthesisUtterance(" ");
-    u.volume = 0;
-    speechSynthesis.speak(u);
-    speechPrimed = true;
-  } catch (e) {
-    console.warn("[tts] prime failed", e);
-  }
-}
-
+// OpenAI TTS — realistic voice with SA-accent instructions.
 async function speak(text) {
   if (!text) return;
-  await ensureVoices();
+  const res = await fetch("/.netlify/functions/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(`tts ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
   return new Promise((resolve) => {
-    const u = new SpeechSynthesisUtterance(text);
-    const voice = pickVoice();
-    if (voice) u.voice = voice;
-    u.rate = 1.0;
-    u.pitch = 1.0;
-
-    let done = false;
-    const finish = () => { if (!done) { done = true; resolve(); } };
-
-    u.onstart = () => console.log("[tts] start:", voice?.name || "default");
-    u.onend = () => { console.log("[tts] end"); finish(); };
-    u.onerror = (e) => { console.warn("[tts] error:", e.error); finish(); };
-
-    try { speechSynthesis.resume(); } catch {}
-    speechSynthesis.speak(u);
-
-    // Safety fallback in case onend never fires (Chrome bug).
-    const estMs = Math.min(30000, Math.max(4000, text.length * 80));
-    setTimeout(finish, estMs + 1500);
+    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+    audio.play();
   });
 }
 
@@ -355,7 +321,10 @@ async function runTurn() {
     intensity = 0.28;
     rotSpeed = 0.008;
 
-    const userText = await listenOnce();
+    setCaption("user", "Listening...");
+    const userText = await listenOnce((live) => {
+      setCaption("user", live || "Listening...");
+    });
     setListening(false);
 
     intensity = 0.18;
@@ -363,10 +332,14 @@ async function runTurn() {
 
     const { reply, mood } = await chat(userText);
 
-    // morph to face, or heart if mood is happy
+    // morph to face, or heart if mood is happy; show the reply text
     setMode(mood === "happy" ? "happy" : "face");
     rotSpeed = 0;
+    setCaption("bot", reply);
     await speak(reply);
+
+    // linger briefly, then fade
+    setTimeout(() => setCaption(null), 600);
 
     // return to blob
     setMode("blob");
@@ -377,13 +350,11 @@ async function runTurn() {
     setMode("blob");
     intensity = 0.15;
     rotSpeed = 0.004;
+    setCaption(null);
     console.warn(e);
   } finally {
     setBusy(false);
   }
 }
 
-micBtn.addEventListener("click", () => {
-  primeSpeech();
-  runTurn();
-});
+micBtn.addEventListener("click", runTurn);
