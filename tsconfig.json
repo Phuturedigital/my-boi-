@@ -18,6 +18,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "server"],
+  "include": ["src", "server", "netlify"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
