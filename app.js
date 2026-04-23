@@ -79,6 +79,38 @@ function faceTargets(n) {
 
 const face = faceTargets(N);
 
+function heartTargets(n) {
+  const raw = [];
+  const gap = 0.045;
+  let tries = 0;
+  while (raw.length < n && tries < n * 40) {
+    tries++;
+    const x = (Math.random() - 0.5) * 2.4;
+    const y = (Math.random() - 0.5) * 2.4;
+    const ym = -y; // math-convention y (up)
+    const v = Math.pow(x * x + ym * ym - 1, 3) - x * x * ym * ym * ym;
+    if (v <= 0) {
+      const isLeft = x < 0;
+      const xOff = isLeft ? -gap : gap;
+      raw.push({
+        x: (x + xOff) * 0.6,
+        y: y * 0.6,
+        z: 0,
+        side: isLeft ? "left" : "right",
+      });
+    }
+  }
+  while (raw.length < n) raw.push(raw[raw.length - 1]);
+  // shuffle for smoother morph
+  for (let i = raw.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [raw[i], raw[j]] = [raw[j], raw[i]];
+  }
+  return raw.slice(0, n);
+}
+
+const heart = heartTargets(N);
+
 /* ---------- Particles ---------- */
 
 const particles = [];
@@ -94,7 +126,7 @@ for (let i = 0; i < N; i++) {
 
 /* ---------- State ---------- */
 
-let mode = "blob";      // "blob" | "face"
+let mode = "blob";      // "blob" | "face" | "happy"
 let intensity = 0.15;   // blob wobble amount
 let rotSpeed = 0.004;
 let angle = 0;
@@ -102,6 +134,7 @@ let t = 0;
 
 function setMode(next) {
   mode = next;
+  document.body.classList.toggle("happy", next === "happy");
 }
 
 /* ---------- Render ---------- */
@@ -110,8 +143,9 @@ function render() {
   t += 0.016;
   angle += rotSpeed;
 
-  // slight trail for depth
-  ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+  // slight trail; clear color matches body background
+  ctx.fillStyle =
+    mode === "happy" ? "rgba(255, 255, 255, 0.25)" : "rgba(0, 0, 0, 0.22)";
   ctx.fillRect(0, 0, W, H);
 
   const sa = Math.sin(angle);
@@ -131,17 +165,23 @@ function render() {
       p.tx = p.bx * wob;
       p.ty = p.by * wob;
       p.tz = p.bz * wob;
-    } else {
+    } else if (mode === "face") {
       const f = face[i];
-      // tiny breathing motion on face
       const breathe = 1 + 0.02 * Math.sin(t * 2 + p.jitter);
       p.tx = f[0] * breathe;
       p.ty = f[1] * breathe;
       p.tz = f[2];
+    } else {
+      // happy: heart shape, gentle pulse
+      const h = heart[i];
+      const pulse = 1 + 0.035 * Math.sin(t * 2.4 + p.jitter);
+      p.tx = h.x * pulse;
+      p.ty = h.y * pulse;
+      p.tz = h.z;
     }
 
     // ease toward target
-    const k = mode === "blob" ? 0.08 : 0.06;
+    const k = mode === "blob" ? 0.08 : 0.07;
     p.x += (p.tx - p.x) * k;
     p.y += (p.ty - p.y) * k;
     p.z += (p.tz - p.z) * k;
@@ -155,12 +195,23 @@ function render() {
     const sx = CX + rx * R * persp;
     const sy = CY + p.y * R * persp;
 
-    // color: cyan front → purple back
     const depth = (rz + 1) / 2;             // 0 back, 1 front
-    const hue = 260 - depth * 70;           // 260 (purple) → 190 (cyan)
-    const sat = 85;
-    const light = 55 + depth * 15;
-    const alpha = 0.35 + depth * 0.5;
+    let hue, sat, light, alpha;
+    if (mode === "happy") {
+      const side = heart[i].side;
+      if (side === "left") {       // navy
+        hue = 212; sat = 62; light = 28 + depth * 12;
+      } else {                     // red
+        hue = 4;   sat = 75; light = 46 + depth * 10;
+      }
+      alpha = 0.75 + depth * 0.2;
+    } else {
+      // cyan front → purple back
+      hue = 260 - depth * 70;
+      sat = 85;
+      light = 55 + depth * 15;
+      alpha = 0.35 + depth * 0.5;
+    }
 
     const size = 1.2 * persp * DPR;
     ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
@@ -217,9 +268,9 @@ async function chat(text) {
     body: JSON.stringify({ messages: history }),
   });
   if (!res.ok) throw new Error(`chat ${res.status}`);
-  const { text: reply } = await res.json();
+  const { text: reply, mood } = await res.json();
   history.push({ role: "assistant", content: reply });
-  return reply;
+  return { reply, mood };
 }
 
 async function speak(text) {
@@ -254,10 +305,10 @@ async function runTurn() {
     intensity = 0.18;
     rotSpeed = 0.012;
 
-    const reply = await chat(userText);
+    const { reply, mood } = await chat(userText);
 
-    // become a face to speak
-    setMode("face");
+    // morph to face, or heart if mood is happy
+    setMode(mood === "happy" ? "happy" : "face");
     rotSpeed = 0;
     await speak(reply);
 
