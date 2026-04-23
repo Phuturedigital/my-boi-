@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice AI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main>
+    <div class="stars"></div>
+
+    <header>
+      <h1>voice<span>AI</span></h1>
+      <p class="tagline">Tap the orb. Speak. Listen.</p>
+    </header>
+
+    <div class="orb-wrap">
+      <button class="orb" id="orb" aria-label="Start talking">
+        <span class="orb-core"></span>
+        <span class="orb-ring ring-1"></span>
+        <span class="orb-ring ring-2"></span>
+        <span class="orb-ring ring-3"></span>
+      </button>
+    </div>
+
+    <div class="status" id="status">Tap to talk</div>
+    <div class="transcript" id="transcript"></div>
+
+    <footer>
+      <span>powered by Claude</span>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
