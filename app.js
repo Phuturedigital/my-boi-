@@ -293,17 +293,35 @@ async function ensureVoices() {
 function pickVoice() {
   const voices = speechSynthesis.getVoices();
   if (voices.length === 0) return null;
+  // Prefer local voices — remote ones silently fail if network is slow.
+  const local = voices.filter((v) => v.localService !== false);
+  const pool = local.length > 0 ? local : voices;
   return (
-    voices.find((v) => v.lang === "en-ZA") ||
-    voices.find((v) => /tessa/i.test(v.name)) ||
-    voices.find((v) => /daniel|karen|moira/i.test(v.name) && v.lang.startsWith("en")) ||
-    voices.find((v) => /google|neural|premium|enhanced/i.test(v.name) && v.lang.startsWith("en")) ||
-    voices.find((v) => v.lang.startsWith("en")) ||
-    voices[0]
+    pool.find((v) => v.lang === "en-ZA") ||
+    pool.find((v) => /tessa/i.test(v.name)) ||
+    pool.find((v) => /daniel|karen|moira|samantha/i.test(v.name) && v.lang.startsWith("en")) ||
+    pool.find((v) => v.lang.startsWith("en")) ||
+    pool[0]
   );
 }
 
+// Chrome/Safari require a user-gesture-initiated speak() to unlock TTS for
+// the tab. Fire a silent utterance on first mic tap so async speaks later work.
+let speechPrimed = false;
+function primeSpeech() {
+  if (speechPrimed) return;
+  try {
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    speechSynthesis.speak(u);
+    speechPrimed = true;
+  } catch (e) {
+    console.warn("[tts] prime failed", e);
+  }
+}
+
 async function speak(text) {
+  if (!text) return;
   await ensureVoices();
   return new Promise((resolve) => {
     const u = new SpeechSynthesisUtterance(text);
@@ -311,10 +329,20 @@ async function speak(text) {
     if (voice) u.voice = voice;
     u.rate = 1.0;
     u.pitch = 1.0;
-    u.onend = resolve;
-    u.onerror = resolve;
-    speechSynthesis.cancel(); // clear anything queued
+
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+
+    u.onstart = () => console.log("[tts] start:", voice?.name || "default");
+    u.onend = () => { console.log("[tts] end"); finish(); };
+    u.onerror = (e) => { console.warn("[tts] error:", e.error); finish(); };
+
+    try { speechSynthesis.resume(); } catch {}
     speechSynthesis.speak(u);
+
+    // Safety fallback in case onend never fires (Chrome bug).
+    const estMs = Math.min(30000, Math.max(4000, text.length * 80));
+    setTimeout(finish, estMs + 1500);
   });
 }
 
@@ -355,4 +383,7 @@ async function runTurn() {
   }
 }
 
-micBtn.addEventListener("click", runTurn);
+micBtn.addEventListener("click", () => {
+  primeSpeech();
+  runTurn();
+});
