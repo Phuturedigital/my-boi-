@@ -1,60 +1,225 @@
-const orb = document.getElementById("orb");
-const statusEl = document.getElementById("status");
-const transcriptEl = document.getElementById("transcript");
+/* Particle cloud that morphs between a wobbling blob and a face. */
+
+const canvas = document.getElementById("scene");
+const ctx = canvas.getContext("2d");
+const micBtn = document.getElementById("mic");
+
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+let W = 0, H = 0, CX = 0, CY = 0, R = 0;
+
+function resize() {
+  W = canvas.width = window.innerWidth * DPR;
+  H = canvas.height = window.innerHeight * DPR;
+  canvas.style.width = window.innerWidth + "px";
+  canvas.style.height = window.innerHeight + "px";
+  CX = W / 2;
+  CY = H / 2;
+  R = Math.min(W, H) * 0.26;
+}
+resize();
+window.addEventListener("resize", resize);
+
+/* ---------- Particle targets ---------- */
+
+const N = 2200;
+
+function fibSphere(n) {
+  const pts = [];
+  const phi = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (i / (n - 1)) * 2;
+    const r = Math.sqrt(1 - y * y);
+    const t = phi * i;
+    pts.push([Math.cos(t) * r, y, Math.sin(t) * r]);
+  }
+  return pts;
+}
+
+const base = fibSphere(N);
+
+function faceTargets(n) {
+  const pts = [];
+  // left eye
+  const eye1 = Math.floor(n * 0.12);
+  for (let i = 0; i < eye1; i++) {
+    const a = (i / eye1) * Math.PI * 2;
+    const rr = 0.06 + Math.random() * 0.04;
+    pts.push([-0.32 + rr * Math.cos(a), -0.22 + rr * Math.sin(a), 0]);
+  }
+  // right eye
+  const eye2 = Math.floor(n * 0.12);
+  for (let i = 0; i < eye2; i++) {
+    const a = (i / eye2) * Math.PI * 2;
+    const rr = 0.06 + Math.random() * 0.04;
+    pts.push([0.32 + rr * Math.cos(a), -0.22 + rr * Math.sin(a), 0]);
+  }
+  // mouth arc
+  const mouth = Math.floor(n * 0.22);
+  for (let i = 0; i < mouth; i++) {
+    const t = i / (mouth - 1);
+    const x = -0.35 + t * 0.7;
+    const y = 0.3 + 0.12 * Math.sin(t * Math.PI);
+    const jitter = (Math.random() - 0.5) * 0.03;
+    pts.push([x + jitter, y + jitter, 0]);
+  }
+  // face outline (elliptical)
+  const outline = n - pts.length;
+  for (let i = 0; i < outline; i++) {
+    const a = (i / outline) * Math.PI * 2;
+    const jitter = 1 + (Math.random() - 0.5) * 0.06;
+    pts.push([0.82 * Math.cos(a) * jitter, 0.95 * Math.sin(a) * jitter, 0]);
+  }
+  // shuffle so morphing looks organic
+  for (let i = pts.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pts[i], pts[j]] = [pts[j], pts[i]];
+  }
+  return pts;
+}
+
+const face = faceTargets(N);
+
+/* ---------- Particles ---------- */
+
+const particles = [];
+for (let i = 0; i < N; i++) {
+  const [x, y, z] = base[i];
+  particles.push({
+    bx: x, by: y, bz: z,
+    x, y, z,
+    tx: x, ty: y, tz: z,
+    jitter: Math.random() * Math.PI * 2,
+  });
+}
+
+/* ---------- State ---------- */
+
+let mode = "blob";      // "blob" | "face"
+let intensity = 0.15;   // blob wobble amount
+let rotSpeed = 0.004;
+let angle = 0;
+let t = 0;
+
+function setMode(next) {
+  mode = next;
+}
+
+/* ---------- Render ---------- */
+
+function render() {
+  t += 0.016;
+  angle += rotSpeed;
+
+  // slight trail for depth
+  ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+  ctx.fillRect(0, 0, W, H);
+
+  const sa = Math.sin(angle);
+  const ca = Math.cos(angle);
+
+  for (let i = 0; i < N; i++) {
+    const p = particles[i];
+
+    // compute target position
+    if (mode === "blob") {
+      const wob =
+        1 +
+        intensity *
+          (Math.sin(p.bx * 3 + t * 1.2 + p.jitter) *
+           Math.cos(p.by * 3 + t * 0.9) +
+           Math.sin(p.bz * 4 + t * 0.7) * 0.4);
+      p.tx = p.bx * wob;
+      p.ty = p.by * wob;
+      p.tz = p.bz * wob;
+    } else {
+      const f = face[i];
+      // tiny breathing motion on face
+      const breathe = 1 + 0.02 * Math.sin(t * 2 + p.jitter);
+      p.tx = f[0] * breathe;
+      p.ty = f[1] * breathe;
+      p.tz = f[2];
+    }
+
+    // ease toward target
+    const k = mode === "blob" ? 0.08 : 0.06;
+    p.x += (p.tx - p.x) * k;
+    p.y += (p.ty - p.y) * k;
+    p.z += (p.tz - p.z) * k;
+
+    // rotate around Y axis
+    const rx = p.x * ca - p.z * sa;
+    const rz = p.x * sa + p.z * ca;
+
+    // perspective project
+    const persp = 2.2 / (2.2 + rz);
+    const sx = CX + rx * R * persp;
+    const sy = CY + p.y * R * persp;
+
+    // color: cyan front → purple back
+    const depth = (rz + 1) / 2;             // 0 back, 1 front
+    const hue = 260 - depth * 70;           // 260 (purple) → 190 (cyan)
+    const sat = 85;
+    const light = 55 + depth * 15;
+    const alpha = 0.35 + depth * 0.5;
+
+    const size = 1.2 * persp * DPR;
+    ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+    ctx.beginPath();
+    ctx.arc(sx, sy, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  requestAnimationFrame(render);
+}
+render();
+
+/* ---------- Voice flow ---------- */
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (!SR) {
-  setStatus("Browser doesn't support speech recognition. Try Chrome.", "error");
-}
-
 const history = [];
-let state = "idle"; // idle | listening | thinking | speaking
+let busy = false;
 
-function setState(next) {
-  state = next;
-  orb.classList.remove("listening", "thinking", "speaking");
-  if (next !== "idle") orb.classList.add(next);
+function setBusy(v) {
+  busy = v;
+  micBtn.classList.toggle("busy", v);
 }
 
-function setStatus(text, cls = "") {
-  statusEl.textContent = text;
-  statusEl.className = "status" + (cls ? " " + cls : "");
-}
-
-function setTranscript(text) {
-  transcriptEl.textContent = text;
-  transcriptEl.classList.toggle("show", Boolean(text));
+function setListening(v) {
+  micBtn.classList.toggle("listening", v);
 }
 
 async function listenOnce() {
   return new Promise((resolve, reject) => {
-    const recognition = new SR();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = "en-US";
+    if (!SR) return reject(new Error("speech-not-supported"));
+    const rec = new SR();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = "en-US";
 
-    recognition.onresult = (e) => resolve(e.results[0][0].transcript);
-    recognition.onerror = (e) => reject(new Error(e.error));
-    recognition.onend = () => {
-      if (state === "listening") reject(new Error("no-speech"));
+    let resolved = false;
+    rec.onresult = (e) => {
+      resolved = true;
+      resolve(e.results[0][0].transcript);
     };
-    recognition.start();
+    rec.onerror = (e) => reject(new Error(e.error));
+    rec.onend = () => {
+      if (!resolved) reject(new Error("no-speech"));
+    };
+    rec.start();
   });
 }
 
-async function chat(userText) {
-  history.push({ role: "user", content: userText });
-
+async function chat(text) {
+  history.push({ role: "user", content: text });
   const res = await fetch("/.netlify/functions/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages: history }),
   });
-
-  if (!res.ok) throw new Error(`chat failed: ${res.status}`);
-  const { text } = await res.json();
-  history.push({ role: "assistant", content: text });
-  return text;
+  if (!res.ok) throw new Error(`chat ${res.status}`);
+  const { text: reply } = await res.json();
+  history.push({ role: "assistant", content: reply });
+  return reply;
 }
 
 async function speak(text) {
@@ -63,55 +228,52 @@ async function speak(text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
-
-  if (!res.ok) throw new Error(`tts failed: ${res.status}`);
+  if (!res.ok) throw new Error(`tts ${res.status}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
-
   return new Promise((resolve) => {
-    audio.onended = () => {
-      URL.revokeObjectURL(url);
-      resolve();
-    };
-    audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve();
-    };
+    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
     audio.play();
   });
 }
 
 async function runTurn() {
-  if (state !== "idle") return;
-
+  if (busy) return;
   try {
-    setState("listening");
-    setStatus("Listening...", "active");
-    setTranscript("");
+    setBusy(true);
+    setListening(true);
+    setMode("blob");
+    intensity = 0.28;
+    rotSpeed = 0.008;
 
     const userText = await listenOnce();
-    setTranscript(`"${userText}"`);
+    setListening(false);
 
-    setState("thinking");
-    setStatus("Thinking...", "active");
+    intensity = 0.18;
+    rotSpeed = 0.012;
+
     const reply = await chat(userText);
-    setTranscript(reply);
 
-    setState("speaking");
-    setStatus("Speaking...", "active");
+    // become a face to speak
+    setMode("face");
+    rotSpeed = 0;
     await speak(reply);
 
-    setState("idle");
-    setStatus("Tap to talk");
-  } catch (err) {
-    setState("idle");
-    if (err.message === "no-speech") {
-      setStatus("Didn't catch that. Tap to try again.");
-    } else {
-      setStatus(err.message || "Something went wrong", "error");
-    }
+    // return to blob
+    setMode("blob");
+    intensity = 0.15;
+    rotSpeed = 0.004;
+  } catch (e) {
+    setListening(false);
+    setMode("blob");
+    intensity = 0.15;
+    rotSpeed = 0.004;
+    console.warn(e);
+  } finally {
+    setBusy(false);
   }
 }
 
-orb.addEventListener("click", runTurn);
+micBtn.addEventListener("click", runTurn);
