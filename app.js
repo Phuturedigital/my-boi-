@@ -350,7 +350,8 @@ async function runTurn() {
     setMode("blob");
     intensity = 0.15;
     rotSpeed = 0.004;
-    setCaption(null);
+    setCaption("bot", `⚠ ${e.message || e}`);
+    setTimeout(() => setCaption(null), 5000);
     console.warn(e);
   } finally {
     setBusy(false);
