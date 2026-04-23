@@ -287,7 +287,11 @@ async function chat(text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages: history }),
   });
-  if (!res.ok) throw new Error(`chat ${res.status}`);
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error || ""; } catch {}
+    throw new Error(`chat ${res.status}${detail ? ": " + detail : ""}`);
+  }
   const { text: reply, mood } = await res.json();
   history.push({ role: "assistant", content: reply });
   return { reply, mood };

@@ -34,26 +34,46 @@ export default async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  const { messages } = await req.json();
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "ANTHROPIC_API_KEY not set in Netlify env vars" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
-  const client = new Anthropic();
-  const response = await client.messages.create({
-    model: "claude-opus-4-7",
-    max_tokens: 500,
-    system: SYSTEM_PROMPT,
-    messages,
-  });
+    const { messages } = await req.json();
 
-  let text =
-    response.content.find((block) => block.type === "text")?.text ?? "";
+    const client = new Anthropic();
+    const response = await client.messages.create({
+      // Haiku 4.5 for voice-demo latency. Swap back to "claude-opus-4-7"
+      // for higher-quality responses (slower, may hit Netlify's 10s limit).
+      model: "claude-haiku-4-5",
+      max_tokens: 300,
+      system: SYSTEM_PROMPT,
+      messages,
+    });
 
-  let mood = "neutral";
-  if (/\[HEART\]/.test(text)) {
-    mood = "happy";
-    text = text.replace(/\s*\[HEART\]\s*/g, " ").trim();
+    let text =
+      response.content.find((block) => block.type === "text")?.text ?? "";
+
+    let mood = "neutral";
+    if (/\[HEART\]/.test(text)) {
+      mood = "happy";
+      text = text.replace(/\s*\[HEART\]\s*/g, " ").trim();
+    }
+
+    return new Response(JSON.stringify({ text, mood }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("chat function error:", err);
+    return new Response(
+      JSON.stringify({
+        error: err?.message || "unknown error",
+        status: err?.status,
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
   }
-
-  return new Response(JSON.stringify({ text, mood }), {
-    headers: { "Content-Type": "application/json" },
-  });
 };
