@@ -273,20 +273,48 @@ async function chat(text) {
   return { reply, mood };
 }
 
-async function speak(text) {
-  const res = await fetch("/.netlify/functions/tts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+// Browser TTS. Uses device voices — free, no API.
+// Prefers South African English (Tessa on Apple devices), then any English.
+
+speechSynthesis.getVoices(); // kick off voice list loading
+
+async function ensureVoices() {
+  if (speechSynthesis.getVoices().length > 0) return;
+  await new Promise((resolve) => {
+    const done = () => {
+      speechSynthesis.removeEventListener("voiceschanged", done);
+      resolve();
+    };
+    speechSynthesis.addEventListener("voiceschanged", done);
+    setTimeout(done, 600);
   });
-  if (!res.ok) throw new Error(`tts ${res.status}`);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const audio = new Audio(url);
+}
+
+function pickVoice() {
+  const voices = speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+  return (
+    voices.find((v) => v.lang === "en-ZA") ||
+    voices.find((v) => /tessa/i.test(v.name)) ||
+    voices.find((v) => /daniel|karen|moira/i.test(v.name) && v.lang.startsWith("en")) ||
+    voices.find((v) => /google|neural|premium|enhanced/i.test(v.name) && v.lang.startsWith("en")) ||
+    voices.find((v) => v.lang.startsWith("en")) ||
+    voices[0]
+  );
+}
+
+async function speak(text) {
+  await ensureVoices();
   return new Promise((resolve) => {
-    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.play();
+    const u = new SpeechSynthesisUtterance(text);
+    const voice = pickVoice();
+    if (voice) u.voice = voice;
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    u.onend = resolve;
+    u.onerror = resolve;
+    speechSynthesis.cancel(); // clear anything queued
+    speechSynthesis.speak(u);
   });
 }
 
