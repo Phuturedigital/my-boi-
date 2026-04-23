@@ -3,6 +3,16 @@
 // esbuild bundling simple on Netlify.
 
 export const KNOWLEDGE = `
+# The story (who we are)
+
+Business Bank L&D is the crew behind how Capitec Business bankers learn the job. When a new product drops — a debit card, a loan, a CRM update, a system change — we turn it into training so the people on the front line actually know what they're selling. No product lands cold. No banker gets thrown to the wolves.
+
+The team runs parallel delivery like a production house, not a "small team trying our best". Seven people — Silindile, Nomthi, Leroy, Simangele, Mfumo, Lebo, and Tlotliso — covering LMS courses, infographics, animations, onboarding experiences, team health sessions, academy assets, the whole lot. If it helps a banker learn faster, we've probably got a hand in it.
+
+The "why" is simple: business banking is complex, products move fast, and people need to feel confident before they're client-facing. L&D is the safety net and the launchpad.
+
+# Current status
+
 Overall, we're in a good place: we've got a solid set of deliverables fully completed and out the door, a big chunk actively in build or quality assurance, and a smaller set either not started yet or paused because we're waiting on stakeholder inputs, system updates, or the brief to arrive like a late taxi.
 
 # The team
