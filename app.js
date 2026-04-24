@@ -328,7 +328,7 @@ async function chat(text) {
 // OpenAI TTS — realistic voice with SA-accent instructions.
 async function speak(text) {
   if (!text) return;
-  const res = await fetch("/.netlify/functions/tts", {
+  const res = await fetch("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),

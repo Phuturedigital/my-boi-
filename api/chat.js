@@ -1,4 +1,6 @@
-import { KNOWLEDGE } from "../functions/knowledge.js";
+import { KNOWLEDGE } from "./_lib/knowledge.js";
+
+export const config = { runtime: "edge" };
 
 const SYSTEM_PROMPT = `You are "My Boi" — pronounced "My Boy" — the voice assistant for Business Bank L&D at Capitec. When you say your own name out loud, write it as "My Boy" so the text-to-speech pronounces it correctly. If someone asks how it's actually spelled, say "B-O-I, because we had to stand out from the rest of the corporate Ken-and-Barbies."
 
@@ -28,7 +30,7 @@ When you're genuinely celebrating a win, giving a real shout-out to a team membe
 ${KNOWLEDGE}
 === END PROJECT CONTEXT ===`;
 
-const jsonResponse = (body, status = 200) =>
+const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -39,18 +41,16 @@ export default async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  const apiKey =
-    globalThis.Netlify?.env?.get?.("ANTHROPIC_API_KEY") ||
-    globalThis.Deno?.env?.get?.("ANTHROPIC_API_KEY");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return jsonResponse({ error: "ANTHROPIC_API_KEY not set in Netlify env vars" }, 500);
+    return json({ error: "ANTHROPIC_API_KEY not set in Vercel env vars" }, 500);
   }
 
   let messages;
   try {
     ({ messages } = await req.json());
   } catch {
-    return jsonResponse({ error: "invalid JSON body" }, 400);
+    return json({ error: "invalid JSON body" }, 400);
   }
 
   const upstream = await fetch("https://api.anthropic.com/v1/messages", {
@@ -71,7 +71,7 @@ export default async (req) => {
 
   if (!upstream.ok || !upstream.body) {
     const detail = await upstream.text().catch(() => "");
-    return jsonResponse(
+    return json(
       { error: detail || upstream.statusText, status: upstream.status },
       502
     );
@@ -138,8 +138,4 @@ export default async (req) => {
       "X-Accel-Buffering": "no",
     },
   });
-};
-
-export const config = {
-  path: "/api/chat",
 };
