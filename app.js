@@ -484,11 +484,19 @@ async function speak(text) {
   const audio = new Audio(url);
   currentAudio = audio;
 
-  // Reveal caption word-by-word in sync with playback. Proportional by
-  // elapsed / duration — not per-word timestamps, but close enough and
-  // feels right against OpenAI's ~steady speaking rate.
+  // Rolling subtitle: the caption only ever shows the last few words the
+  // bot is actively speaking. Older words fall off the left, new ones
+  // slide in on the right, and the whole thing fades out when audio ends.
   const words = text.split(/\s+/).filter(Boolean);
+  const WINDOW = 3;
   let lastShown = -1;
+
+  const pulseCaption = () => {
+    captionEl.classList.remove("pulse");
+    // Force reflow so the animation restarts on every word change.
+    void captionEl.offsetWidth;
+    captionEl.classList.add("pulse");
+  };
 
   return new Promise((resolve) => {
     audio.onplaying = () => {
@@ -500,11 +508,13 @@ async function speak(text) {
       const n = Math.max(1, Math.ceil(frac * words.length));
       if (n !== lastShown) {
         lastShown = n;
-        setCaption("bot", words.slice(0, n).join(" "));
+        const start = Math.max(0, n - WINDOW);
+        setCaption("bot", words.slice(start, n).join(" "));
+        pulseCaption();
       }
     };
     audio.onended = () => {
-      setCaption("bot", text);
+      setCaption(null);
       URL.revokeObjectURL(url);
       resolve();
     };

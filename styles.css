@@ -85,6 +85,18 @@ html, body {
   font-size: 14px;
 }
 
+/* Per-word pulse while the bot speaks — gives a subtle fade-in each
+   time the rolling subtitle advances. Re-triggered by removing and
+   re-adding the class (see pulseCaption in app.js). */
+.caption.pulse.bot {
+  animation: captionPulse 0.32s ease;
+}
+
+@keyframes captionPulse {
+  0%   { opacity: 0.35; transform: translateX(-50%) translateY(3px); }
+  100% { opacity: 1;    transform: translateX(-50%) translateY(0); }
+}
+
 /* Subtle setup hint — only until first successful mic grant */
 .hint {
   position: fixed;
