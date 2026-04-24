@@ -43,7 +43,23 @@ export default async (req) => {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return json({ error: "ANTHROPIC_API_KEY not set in Vercel env vars" }, 500);
+    const visibleKeys = Object.keys(process.env || {})
+      .filter(
+        (k) =>
+          !k.startsWith("VERCEL_") &&
+          !k.startsWith("AWS_") &&
+          !k.startsWith("NODE_")
+      )
+      .sort();
+    return json(
+      {
+        error: "ANTHROPIC_API_KEY not set for this deployment",
+        hint: "Vercel Project Settings → Environment Variables; make sure the var is ticked for this deploy's environment (Production/Preview), then redeploy.",
+        vercel_env: process.env.VERCEL_ENV || null,
+        custom_env_keys_visible: visibleKeys,
+      },
+      500
+    );
   }
 
   let messages;
