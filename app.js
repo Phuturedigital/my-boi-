@@ -395,8 +395,8 @@ async function sendTurn(text) {
       startRec();
       return;
     }
-    setState(STATE.AI_SPEAKING);
-    setCaption("bot", reply);
+    // speak() flips state to AI_SPEAKING when audio actually starts and
+    // reveals the caption word-by-word in sync with playback.
     await speak(reply);
   } catch (err) {
     console.warn(err);
@@ -475,8 +475,31 @@ async function speak(text) {
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
   currentAudio = audio;
+
+  // Reveal caption word-by-word in sync with playback. Proportional by
+  // elapsed / duration — not per-word timestamps, but close enough and
+  // feels right against OpenAI's ~steady speaking rate.
+  const words = text.split(/\s+/).filter(Boolean);
+  let lastShown = -1;
+
   return new Promise((resolve) => {
-    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+    audio.onplaying = () => {
+      setState(STATE.AI_SPEAKING);
+    };
+    audio.ontimeupdate = () => {
+      if (!audio.duration || !isFinite(audio.duration)) return;
+      const frac = Math.min(1, audio.currentTime / audio.duration);
+      const n = Math.max(1, Math.ceil(frac * words.length));
+      if (n !== lastShown) {
+        lastShown = n;
+        setCaption("bot", words.slice(0, n).join(" "));
+      }
+    };
+    audio.onended = () => {
+      setCaption("bot", text);
+      URL.revokeObjectURL(url);
+      resolve();
+    };
     audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
     audio.play().catch(() => resolve());
   });

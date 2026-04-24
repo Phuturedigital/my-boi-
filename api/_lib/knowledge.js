@@ -19,6 +19,69 @@ Overall, we're in a good place: we've got a solid set of deliverables fully comp
 
 Shout-out to the whole crew — Silindile Hlengwa, Nomthi Mthiyane, Leroy Februarie, Simangele Khumalo, Mfumo Ngobeni, Lebo Setshedi, and Tlotliso Mosiana — because the amount of parallel delivery here is giving "production house", not "small team trying our best".
 
+# Key programmes for Business Banking
+
+The big things the L&D team is standing up right now — the pieces that define the year, not just the week.
+
+## Business Banking Academy (BBA)
+Design and delivery of a structured, role-based learning academy aligned to Business Banking strategy, systems, and products. Covers product learning across Overdraft, VAF, Debit Card, Savings, Merchant Services, BRAYE and Credit Card. Adds system enablement for Salesforce, nCino, OnBase and AWS. Wraps in foundational orientation, onboarding and capability pathways. Delivered as a blend — eLearning, animations, infographics, manuals, simulations.
+Why it matters: single source of truth for Business Banking capability. Accelerates banker readiness.
+
+## BSC Business Banking Training Plan
+End-to-end training strategy and tracker for Sales Support, Account Maintenance and Forex teams. Built on needs analysis with Ops, process guides and system-based learning, plus training trackers, SOP alignment and rollout planning.
+Why it matters: operational accuracy, fewer errors, faster turnaround in high-volume BSC environments.
+
+## CED Training Plan 2026
+Strategic learning framework supporting Credit Enablement and Delivery as a product- and domain-driven capability. Includes the CED learning framework and priorities, an executive-level deck for leadership alignment, and skills matrices for capability planning.
+Why it matters: positions learning as a strategic execution lever, not a support function.
+
+## BRAYE Learning Enablement
+Learning support for the BRAYE app and client experience journeys. Animations, eLearning content, SME engagement and journey clarification.
+Why it matters: supports digital adoption and consistent banker guidance on a brand-new platform.
+
+## Credit Card Learning (Business Bank and BSC)
+Learning enablement for the new Business Bank Credit Card value chain. Instructional Design job cards, manuals, scopes and learning frameworks. Enablement prep for Sales Support and Account Maintenance.
+Why it matters: responsible credit usage, correct system execution, and confident client support at launch.
+
+## Onboarding and Culture Enablement
+Structured onboarding aligned to Capitec Business Banking culture. Perfect Day 1 sessions, orientation programmes, and Business Banking culture injection.
+Why it matters: early productivity, engagement and consistency for new joiners.
+
+# What the team delivered together
+
+This isn't individual effort — it's collective delivery under pressure, with shared ownership and accountability.
+
+Shared wins across the crew:
+- A fully structured Business Banking Academy with clear learning pathways.
+- Shift from ad-hoc training to intentional, role-based capability building.
+- Strong collaboration between Learning Partners and LXDs.
+- Reduced reliance on external vendors through internal IP creation.
+- Visible improvement in how Business Banking learning is positioned — strategic, professional, credible.
+
+Behind those wins: multiple complex, fast-moving business initiatives taken from ambiguity to structured learning solutions, delivered across Business, Credit, CED, BSC, Product, HR and Ops — often in parallel. BAU, strategic delivery, executive presentations and Townhall prep, all running at the same time. Quality held up through ongoing changes, feedback loops, and dependency shifts.
+
+# Why this matters for Capitec Business Bank
+
+For the business:
+- Faster time-to-competence for bankers and support teams.
+- More consistent execution across branches, BSC and credit environments.
+- Reduced operational risk through system-aligned learning.
+- Better adoption of new products, systems and changes.
+- A scalable learning model that grows with the business.
+
+For clients:
+- More confident bankers, fewer errors and rework.
+- Better client conversations and outcomes.
+- Faster turnaround times and improved experience.
+
+For Capitec as a bank:
+- Learning becomes an enabler of strategy, not an afterthought.
+- Stronger internal capability means lower dependency on external providers.
+- A sustainable talent and capability pipeline for Business Banking.
+- Clear alignment from strategy to execution to learning.
+
+Bottom line: the effort the L&D team has put in directly supports Capitec Business Bank's ability to grow responsibly, execute consistently, and deliver a world-class client experience through capable, confident people.
+
 # Done and out the door
 
 - Multiple LMS course creation, assignment, testing and deployment pieces are complete, including the Pre-Approved Overdraft process on nCino, CR-PRO Automated Progression, and the Docusign deployment — not just content, that's operational enablement actually live for learners.
