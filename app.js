@@ -453,7 +453,9 @@ let recRunning = false;
 let partialTranscript = "";
 let finalTranscript = "";
 let silenceTimer = null;
-const SILENCE_MS = 450;
+// Backup only — primary endpointing is amplitude-based (see pollAmplitude).
+// If VAD misses (weird mic noise floor), this timer still fires the turn.
+const SILENCE_MS = 350;
 
 function createRecognition() {
   if (!SR) return null;
@@ -551,6 +553,13 @@ let analyser = null;
 let dataArray = null;
 let micStream = null;
 let interruptCount = 0;
+// Endpoint-detection: once the user has said something and the mic goes
+// quiet for ~230ms, fire the turn immediately — don't wait out the full
+// silence timer. Amplitude drops faster than SpeechRecognition's "final"
+// event, which is where most of the perceived lag lives.
+let vadQuietFrames = 0;
+const VAD_QUIET_THRESHOLD = 0.035;
+const VAD_QUIET_FRAMES_NEEDED = 14;
 
 async function initMic() {
   if (micStarted) return true;
@@ -604,6 +613,24 @@ function pollAmplitude() {
     interruptCount = 0;
   }
 
+  // Endpointing: user has something transcribed + mic has been quiet
+  // long enough → fire the turn before the silence timer would.
+  if (state === STATE.USER_SPEAKING) {
+    const text = (finalTranscript + " " + partialTranscript).trim();
+    if (text.length >= 2 && amplitude < VAD_QUIET_THRESHOLD) {
+      vadQuietFrames++;
+      if (vadQuietFrames >= VAD_QUIET_FRAMES_NEEDED) {
+        vadQuietFrames = 0;
+        if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+        sendTurn(text);
+      }
+    } else {
+      vadQuietFrames = 0;
+    }
+  } else {
+    vadQuietFrames = 0;
+  }
+
   requestAnimationFrame(pollAmplitude);
 }
 
@@ -611,6 +638,10 @@ function pollAmplitude() {
 let currentAudio = null;
 let currentSpeakResolve = null;
 let turnInFlight = false;
+// Monotonic turn id. Bumped on every new turn, interrupt, or mute — any
+// in-flight fetch or queued speakChunk checks this and bails if it has
+// been superseded, so a cancelled turn can't stomp on the next one.
+let turnToken = 0;
 
 // Tear down any in-flight TTS so a new one can start cleanly. Without this,
 // an interrupted audio.pause() never fires onended, the old speak() promise
@@ -638,6 +669,8 @@ async function sendTurn(text) {
   if (!userText) return;
 
   turnInFlight = true;
+  const myToken = ++turnToken;
+  killCurrentSpeech();
   stopRec();
   finalTranscript = "";
   partialTranscript = "";
@@ -645,15 +678,7 @@ async function sendTurn(text) {
   setCaption("user", userText);
 
   try {
-    const { reply } = await chat(userText);
-    if (!reply) {
-      setState(STATE.DORMANT);
-      startRec();
-      return;
-    }
-    // speak() flips state to AI_SPEAKING when audio actually starts and
-    // reveals the caption word-by-word in sync with playback.
-    await speak(reply);
+    await streamReply(userText, myToken);
   } catch (err) {
     console.warn(err);
     setCaption("error", `Error: ${err.message || err}`);
@@ -661,7 +686,7 @@ async function sendTurn(text) {
   } finally {
     turnInFlight = false;
     currentAudio = null;
-    if (!muted) {
+    if (!muted && myToken === turnToken) {
       // After a turn finishes we drop back to DORMANT so the mic doesn't
       // pick up ambient chatter as the next question. User has to say
       // "my boi" again to reopen.
@@ -672,6 +697,7 @@ async function sendTurn(text) {
 }
 
 function interruptAI() {
+  turnToken++; // invalidate any queued speakChunks from the current turn
   killCurrentSpeech();
   setCaption(null);
   setState(STATE.DORMANT);
@@ -680,8 +706,34 @@ function interruptAI() {
   startRec();
 }
 
-async function chat(text) {
-  history.push({ role: "user", content: text });
+// Sentence splitter: pulls out complete sentences as they stream in.
+// A sentence is anything ending in a run of .!?… followed by whitespace.
+// End-of-buffer is intentionally NOT a boundary — mid-stream the tail
+// might still be growing, so we only flush it at end-of-stream via the
+// explicit pending.trim() path. Short fragments are ignored.
+const SENTENCE_RE = /(.+?[.!?…]+)\s+/gs;
+
+function extractSentences(buffer) {
+  const out = [];
+  let lastIdx = 0;
+  SENTENCE_RE.lastIndex = 0;
+  let m;
+  while ((m = SENTENCE_RE.exec(buffer)) !== null) {
+    const s = m[1].trim();
+    if (s.length > 1) out.push(s);
+    lastIdx = SENTENCE_RE.lastIndex;
+  }
+  return { sentences: out, remainder: buffer.slice(lastIdx) };
+}
+
+// The heart of the latency win: while Claude is still streaming tokens
+// back, we slice off each complete sentence and fire /api/tts on it
+// immediately. Playback is chained serially via speakChain, so sentence 2
+// starts the instant sentence 1's audio ends — even if Claude is still
+// generating sentence 3 in the background.
+async function streamReply(userText, myToken) {
+  history.push({ role: "user", content: userText });
+
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -696,12 +748,26 @@ async function chat(text) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  let reply = "";
-  let mood = "neutral";
+  let pending = "";
+  let fullReply = "";
+  let speakChain = Promise.resolve();
+
+  const enqueue = (sentence) => {
+    const s = sentence.trim();
+    if (!s) return;
+    speakChain = speakChain.then(() => {
+      if (myToken !== turnToken) return;
+      return speakChunk(s, myToken);
+    });
+  };
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
+    if (myToken !== turnToken) {
+      try { reader.cancel(); } catch {}
+      break;
+    }
     buf += decoder.decode(value, { stream: true });
     let nl;
     while ((nl = buf.indexOf("\n")) !== -1) {
@@ -710,22 +776,41 @@ async function chat(text) {
       if (!line) continue;
       let msg;
       try { msg = JSON.parse(line); } catch { continue; }
-      if (msg.type === "text") reply += msg.delta;
-      else if (msg.type === "done") { reply = msg.text; mood = msg.mood; }
-      else if (msg.type === "error") throw new Error(msg.error);
+      if (msg.type === "text") {
+        fullReply += msg.delta;
+        pending += msg.delta;
+        const { sentences, remainder } = extractSentences(pending);
+        pending = remainder;
+        for (const s of sentences) enqueue(s);
+      } else if (msg.type === "done") {
+        // server sends the final cleaned text (stripped of internal markers)
+        fullReply = msg.text;
+      } else if (msg.type === "error") {
+        throw new Error(msg.error);
+      }
     }
   }
 
-  history.push({ role: "assistant", content: reply });
-  return { reply, mood };
+  // Flush whatever is left in `pending` (last sentence if it didn't end
+  // with punctuation, or a tail fragment).
+  if (pending.trim()) enqueue(pending);
+
+  await speakChain;
+
+  if (myToken === turnToken) {
+    setCaption(null);
+    history.push({ role: "assistant", content: fullReply });
+  }
 }
 
-async function speak(text) {
+// One sentence in → MP3 out → plays. Called in sequence by streamReply
+// so the audio chunks stitch together without gaps. myToken is the turn's
+// identity; if it changes mid-flight (interrupt, mute, new turn) we bail.
+async function speakChunk(text, myToken) {
   if (!text) return;
-  // Ensure no prior TTS is still in-flight.
-  killCurrentSpeech();
+  if (myToken !== turnToken) return;
 
-  // Pull shape cues out of the reply and remember roughly where each sits
+  // Pull shape cues out of the chunk and remember roughly where each sits
   // in the spoken word stream, so we can fire the morph in time with the
   // voice. The cleaned text (tags removed) is what we display and play.
   const cues = [];
@@ -751,7 +836,9 @@ async function speak(text) {
     body: JSON.stringify({ text: cleanText }),
   });
   if (!res.ok) throw new Error(`tts ${res.status}`);
+  if (myToken !== turnToken) return;
   const blob = await res.blob();
+  if (myToken !== turnToken) return;
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
   currentAudio = audio;
@@ -779,7 +866,7 @@ async function speak(text) {
       resolve();
     };
     audio.onplaying = () => {
-      setState(STATE.AI_SPEAKING);
+      if (state !== STATE.AI_SPEAKING) setState(STATE.AI_SPEAKING);
     };
     audio.ontimeupdate = () => {
       if (!audio.duration || !isFinite(audio.duration)) return;
@@ -796,7 +883,9 @@ async function speak(text) {
         cueIdx++;
       }
     };
-    audio.onended = () => { setCaption(null); finish(); };
+    // Only wipe the caption between chunks if the next chunk hasn't
+    // already taken over — avoid a visible flicker at sentence seams.
+    audio.onended = () => { finish(); };
     audio.onerror = () => { finish(); };
     audio.play().catch(() => finish());
   });
