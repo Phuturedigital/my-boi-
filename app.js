@@ -211,12 +211,18 @@ for (let i = 0; i < N; i++) {
 // ---------- State ----------
 const STATE = {
   IDLE: "idle",
+  DORMANT: "dormant",
   LISTENING: "listening",
   USER_SPEAKING: "user",
   PROCESSING: "processing",
   AI_SPEAKING: "ai",
   MUTED: "muted",
 };
+
+// Wake-word matcher. Chrome often transcribes "boi" as "boy"; "my" sometimes
+// arrives as "mai". We accept a small cluster of hot variants so the demo
+// isn't fragile to one misheard phoneme.
+const WAKE_RE = /\b(?:hey|hi|ok|okay)?\s*(?:my|mai)\s*(?:boi|boy|boys)\b/i;
 
 let state = STATE.IDLE;
 let stateEnteredAt = performance.now();
@@ -240,6 +246,7 @@ function setState(next) {
 function renderStatus() {
   const labels = {
     [STATE.IDLE]: "",
+    [STATE.DORMANT]: "Say “my boi”",
     [STATE.LISTENING]: "Listening",
     [STATE.USER_SPEAKING]: "",
     [STATE.PROCESSING]: "Thinking",
@@ -298,6 +305,16 @@ function render(now) {
       wobbleAmp = 0.07;
       brightness = 0.45;
       rotSpeed = 0.0025;
+      break;
+    case STATE.DORMANT:
+      // Quiet-but-alive: dimmer than IDLE, a hair cooler in hue, slow
+      // breathing rotation so it reads as "waiting for its name".
+      scale = 0.94 + Math.sin(t * 0.6) * 0.012;
+      wobbleAmp = 0.045;
+      brightness = 0.3;
+      baseHue = 215;
+      hueSpread = 18;
+      rotSpeed = 0.0022;
       break;
     case STATE.LISTENING:
       scale = 0.96 + Math.sin(t * 1.2) * 0.02;
@@ -458,11 +475,36 @@ function createRecognition() {
     partialTranscript = interim;
 
     const full = (finalTranscript + " " + partialTranscript).trim();
-    if (full) {
-      if (state !== STATE.USER_SPEAKING) setState(STATE.USER_SPEAKING);
-      setCaption("user", full);
-      resetSilenceTimer();
+    if (!full) return;
+
+    // Wake-word gate: while dormant, we transcribe but stay silent until
+    // the hotword hits. Anything the user says after "my boi" in the same
+    // utterance becomes the actual turn, so "my boi how's the academy?"
+    // wakes us and asks in one breath.
+    if (state === STATE.DORMANT) {
+      const m = full.match(WAKE_RE);
+      if (m) {
+        const after = full.slice(m.index + m[0].length).trim();
+        finalTranscript = after;
+        partialTranscript = "";
+        if (after) {
+          setState(STATE.USER_SPEAKING);
+          setCaption("user", after);
+          resetSilenceTimer();
+        } else {
+          setState(STATE.LISTENING);
+        }
+      } else if (finalTranscript.length > 160) {
+        // Keep the pre-wake buffer small so stale finals don't drown the
+        // hotword scan on long dormant stretches.
+        finalTranscript = finalTranscript.slice(-80);
+      }
+      return;
     }
+
+    if (state !== STATE.USER_SPEAKING) setState(STATE.USER_SPEAKING);
+    setCaption("user", full);
+    resetSilenceTimer();
   };
 
   r.onerror = (e) => {
@@ -605,7 +647,7 @@ async function sendTurn(text) {
   try {
     const { reply } = await chat(userText);
     if (!reply) {
-      setState(STATE.LISTENING);
+      setState(STATE.DORMANT);
       startRec();
       return;
     }
@@ -620,7 +662,10 @@ async function sendTurn(text) {
     turnInFlight = false;
     currentAudio = null;
     if (!muted) {
-      setState(STATE.LISTENING);
+      // After a turn finishes we drop back to DORMANT so the mic doesn't
+      // pick up ambient chatter as the next question. User has to say
+      // "my boi" again to reopen.
+      setState(STATE.DORMANT);
       startRec();
     }
   }
@@ -629,7 +674,7 @@ async function sendTurn(text) {
 function interruptAI() {
   killCurrentSpeech();
   setCaption(null);
-  setState(STATE.USER_SPEAKING);
+  setState(STATE.DORMANT);
   finalTranscript = "";
   partialTranscript = "";
   startRec();
@@ -764,7 +809,7 @@ async function start() {
   muted = false;
   micBtn.setAttribute("aria-pressed", "true");
   micBtn.classList.add("active");
-  setState(STATE.LISTENING);
+  setState(STATE.DORMANT);
   startRec();
 }
 
@@ -781,7 +826,7 @@ function toggleMute() {
     micBtn.setAttribute("aria-pressed", "true");
     micBtn.classList.add("active");
     if (!micStarted) { start(); return; }
-    setState(STATE.LISTENING);
+    setState(STATE.DORMANT);
     startRec();
   }
 }
