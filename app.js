@@ -64,6 +64,7 @@ const STATE = {
 };
 
 let state = STATE.IDLE;
+let stateEnteredAt = performance.now();
 let muted = false;
 let amplitude = 0;      // 0..1 smoothed RMS from mic
 let micStarted = false;
@@ -77,6 +78,7 @@ const micBtn = document.getElementById("mic");
 function setState(next) {
   if (state === next) return;
   state = next;
+  stateEnteredAt = performance.now();
   renderStatus();
 }
 
@@ -160,13 +162,19 @@ function render(now) {
       rotSpeed = 0.008 + a * 0.012;
       break;
     }
-    case STATE.PROCESSING:
-      scale = 0.78 + Math.sin(t * 3) * 0.04;
-      wobbleAmp = 0.05;
-      brightness = 0.7;
-      baseHue = 258;
-      rotSpeed = 0.05;
+    case STATE.PROCESSING: {
+      // Ramp intensity the longer we sit in PROCESSING so a short think
+      // stays calm and a long think visibly "works harder".
+      const dwell = (now - stateEnteredAt) / 1000;
+      const intensity = Math.min(1, Math.max(0, (dwell - 0.3) / 1.5));
+      scale = 0.78 + Math.sin(t * (3 + intensity * 2.5)) * (0.04 + intensity * 0.03);
+      wobbleAmp = 0.05 + intensity * 0.05;
+      brightness = 0.7 + intensity * 0.18;
+      baseHue = 258 - intensity * 14;
+      hueSpread = 40 + intensity * 20;
+      rotSpeed = 0.05 + intensity * 0.08;
       break;
+    }
     case STATE.AI_SPEAKING: {
       const pulse = Math.sin(t * 3.4) * 0.5 + 0.5;
       const a = Math.min(1, amplitude * 3);
@@ -245,7 +253,7 @@ let recRunning = false;
 let partialTranscript = "";
 let finalTranscript = "";
 let silenceTimer = null;
-const SILENCE_MS = 900;
+const SILENCE_MS = 600;
 
 function createRecognition() {
   if (!SR) return null;

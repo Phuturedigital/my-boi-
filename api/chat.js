@@ -87,9 +87,18 @@ export default async (req) => {
     },
     body: JSON.stringify({
       model: "claude-haiku-4-5",
-      max_tokens: 300,
+      max_tokens: 400,
       stream: true,
-      system: SYSTEM_PROMPT,
+      // Array form + cache_control enables prompt caching. The KNOWLEDGE
+      // block is static across turns, so turn 2+ skip re-processing it
+      // (≈300–700ms saved per call).
+      system: [
+        {
+          type: "text",
+          text: SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
       messages,
     }),
   });
