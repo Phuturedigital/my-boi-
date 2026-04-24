@@ -1,9 +1,15 @@
-/* Particle cloud that morphs between a wobbling blob and a face. */
+/* Ambient AI voice surface.
+ *
+ * One orb of particles reacts to mic input and conversation state:
+ * IDLE → LISTENING → USER_SPEAKING → PROCESSING → AI_SPEAKING → LISTENING.
+ * Continuous conversation via browser SpeechRecognition + Web Audio VAD;
+ * mic button is a mute toggle. If the user speaks while the bot is speaking,
+ * TTS pauses and recognition resumes.
+ */
 
+// ---------- Canvas ----------
 const canvas = document.getElementById("scene");
 const ctx = canvas.getContext("2d");
-const micBtn = document.getElementById("mic");
-
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
 let W = 0, H = 0, CX = 0, CY = 0, R = 0;
 
@@ -14,14 +20,13 @@ function resize() {
   canvas.style.height = window.innerHeight + "px";
   CX = W / 2;
   CY = H / 2;
-  R = Math.min(W, H) * 0.26;
+  R = Math.min(W, H) * 0.22;
 }
 resize();
 window.addEventListener("resize", resize);
 
-/* ---------- Particle targets ---------- */
-
-const N = 2200;
+// ---------- Orb particles ----------
+const N = 2400;
 
 function fibSphere(n) {
   const pts = [];
@@ -35,84 +40,162 @@ function fibSphere(n) {
   return pts;
 }
 
-const base = fibSphere(N);
+// Normalize a point cloud so its widest extent sits within [-1, 1].
+function normalizeCloud(pts) {
+  let maxR = 0;
+  for (const [x, y, z] of pts) {
+    const r = Math.max(Math.abs(x), Math.abs(y), Math.abs(z));
+    if (r > maxR) maxR = r;
+  }
+  if (maxR === 0) return pts;
+  return pts.map(([x, y, z]) => [x / maxR, y / maxR, z / maxR]);
+}
 
-function faceTargets(n) {
+// Deterministic pseudo-random so shapes render identically each reload.
+function seededRand(seed) {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 0xffffffff;
+  };
+}
+
+// Classic parametric heart — point at bottom, cusp at top.
+// Screen-space y goes down so we flip the traditional equation.
+function heartShape(n) {
+  const rng = seededRand(7);
   const pts = [];
-  // left eye
-  const eye1 = Math.floor(n * 0.12);
-  for (let i = 0; i < eye1; i++) {
-    const a = (i / eye1) * Math.PI * 2;
-    const rr = 0.06 + Math.random() * 0.04;
-    pts.push([-0.32 + rr * Math.cos(a), -0.22 + rr * Math.sin(a), 0]);
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    const shell = i % 4;
+    const scale = 1 - shell * 0.12;
+    const x = 16 * Math.pow(Math.sin(t), 3) * scale;
+    const yv =
+      13 * Math.cos(t) -
+      5 * Math.cos(2 * t) -
+      2 * Math.cos(3 * t) -
+      Math.cos(4 * t);
+    const y = -yv * scale;
+    const z = (rng() - 0.5) * 6 * (1 - shell * 0.2);
+    pts.push([x, y, z]);
   }
-  // right eye
-  const eye2 = Math.floor(n * 0.12);
-  for (let i = 0; i < eye2; i++) {
-    const a = (i / eye2) * Math.PI * 2;
-    const rr = 0.06 + Math.random() * 0.04;
-    pts.push([0.32 + rr * Math.cos(a), -0.22 + rr * Math.sin(a), 0]);
-  }
-  // mouth arc
-  const mouth = Math.floor(n * 0.22);
-  for (let i = 0; i < mouth; i++) {
-    const t = i / (mouth - 1);
-    const x = -0.35 + t * 0.7;
-    const y = 0.3 + 0.12 * Math.sin(t * Math.PI);
-    const jitter = (Math.random() - 0.5) * 0.03;
-    pts.push([x + jitter, y + jitter, 0]);
-  }
-  // face outline (elliptical)
-  const outline = n - pts.length;
-  for (let i = 0; i < outline; i++) {
-    const a = (i / outline) * Math.PI * 2;
-    const jitter = 1 + (Math.random() - 0.5) * 0.06;
-    pts.push([0.82 * Math.cos(a) * jitter, 0.95 * Math.sin(a) * jitter, 0]);
-  }
-  // shuffle so morphing looks organic
-  for (let i = pts.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pts[i], pts[j]] = [pts[j], pts[i]];
-  }
-  return pts;
+  return normalizeCloud(pts);
 }
 
-const face = faceTargets(N);
-
-function heartTargets(n) {
-  const raw = [];
-  const gap = 0.045;
-  let tries = 0;
-  while (raw.length < n && tries < n * 40) {
-    tries++;
-    const x = (Math.random() - 0.5) * 2.4;
-    const y = (Math.random() - 0.5) * 2.4;
-    const ym = -y; // math-convention y (up)
-    const v = Math.pow(x * x + ym * ym - 1, 3) - x * x * ym * ym * ym;
-    if (v <= 0) {
-      const isLeft = x < 0;
-      const xOff = isLeft ? -gap : gap;
-      raw.push({
-        x: (x + xOff) * 0.6,
-        y: y * 0.6,
-        z: 0,
-        side: isLeft ? "left" : "right",
-      });
+// Rocket pointing up: nose cone at top, body, tail fins, flame below.
+function rocketShape(n) {
+  const rng = seededRand(11);
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const sect = rng();
+    let x, y, z;
+    if (sect < 0.5) {
+      // cylindrical body
+      y = -0.5 + rng() * 1.0;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.22 + rng() * 0.02;
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else if (sect < 0.72) {
+      // nose cone up top (negative y)
+      const tt = rng();
+      y = -0.5 - tt * 0.5;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.24 * (1 - tt);
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else if (sect < 0.9) {
+      // four fins flared at the base
+      const finIdx = Math.floor(rng() * 4);
+      const theta = (finIdx / 4) * Math.PI * 2;
+      const tY = rng();
+      y = 0.3 + tY * 0.25;
+      const rad = 0.22 + (1 - tY) * 0.28 * rng();
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else {
+      // flame exhaust
+      const tt = rng();
+      y = 0.55 + tt * 0.4;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.16 * (1 - tt) * rng();
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
     }
+    pts.push([x, y, z]);
   }
-  while (raw.length < n) raw.push(raw[raw.length - 1]);
-  // shuffle for smoother morph
-  for (let i = raw.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [raw[i], raw[j]] = [raw[j], raw[i]];
-  }
-  return raw.slice(0, n);
+  return normalizeCloud(pts);
 }
 
-const heart = heartTargets(N);
+// Trophy: cup on top, two side handles, stem, plinth base.
+function trophyShape(n) {
+  const rng = seededRand(19);
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const sect = rng();
+    let x, y, z;
+    if (sect < 0.42) {
+      // cup — tapered bowl, widest at top rim
+      const tt = rng();
+      y = -1 + tt * 0.7;
+      const rad = 0.3 + tt * 0.3;
+      const theta = rng() * Math.PI * 2;
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else if (sect < 0.62) {
+      // two side handles — vertical arcs on left/right
+      const side = rng() < 0.5 ? 1 : -1;
+      const phi = (rng() - 0.5) * Math.PI * 1.1;
+      const cx = side * 0.55;
+      const cy = -0.6;
+      x = cx + side * 0.22 * Math.cos(phi);
+      y = cy + 0.32 * Math.sin(phi);
+      z = (rng() - 0.5) * 0.08;
+    } else if (sect < 0.82) {
+      // stem
+      y = -0.3 + rng() * 0.7;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.08;
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else {
+      // base plinth
+      const tt = rng();
+      y = 0.4 + tt * 0.3;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.42 - tt * 0.05;
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    }
+    pts.push([x, y, z]);
+  }
+  return normalizeCloud(pts);
+}
 
-/* ---------- Particles ---------- */
+const shapes = {
+  sphere: fibSphere(N),
+  heart: heartShape(N),
+  rocket: rocketShape(N),
+  trophy: trophyShape(N),
+};
 
+// Per-shape palette overrides while morphed.
+const SHAPE_STYLE = {
+  heart: { hue: 342, spread: 28 },
+  rocket: { hue: 28, spread: 48 },
+  trophy: { hue: 48, spread: 26 },
+};
+
+let shapeTarget = "sphere";
+let shapeHoldUntil = 0;
+
+function morphTo(shape, hold = 2400) {
+  if (!shapes[shape] || shape === "sphere") return;
+  shapeTarget = shape;
+  shapeHoldUntil = performance.now() + hold;
+}
+
+const base = shapes.sphere;
 const particles = [];
 for (let i = 0; i < N; i++) {
   const [x, y, z] = base[i];
@@ -121,100 +204,239 @@ for (let i = 0; i < N; i++) {
     x, y, z,
     tx: x, ty: y, tz: z,
     jitter: Math.random() * Math.PI * 2,
+    phase: Math.random(),
   });
 }
 
-/* ---------- State ---------- */
+// ---------- State ----------
+const STATE = {
+  IDLE: "idle",
+  DORMANT: "dormant",
+  LISTENING: "listening",
+  USER_SPEAKING: "user",
+  PROCESSING: "processing",
+  AI_SPEAKING: "ai",
+  MUTED: "muted",
+};
 
-let mode = "blob";      // "blob" | "face" | "happy"
-let intensity = 0.15;   // blob wobble amount
-let rotSpeed = 0.004;
-let angle = 0;
-let t = 0;
+// Wake-word matcher. Chrome often transcribes "boi" as "boy"; "my" sometimes
+// arrives as "mai". We accept a small cluster of hot variants so the demo
+// isn't fragile to one misheard phoneme.
+const WAKE_RE = /\b(?:hey|hi|ok|okay)?\s*(?:my|mai)\s*(?:boi|boy|boys)\b/i;
 
-function setMode(next) {
-  mode = next;
-  document.body.classList.toggle("happy", next === "happy");
+let state = STATE.IDLE;
+let stateEnteredAt = performance.now();
+let muted = false;
+let amplitude = 0;      // 0..1 smoothed RMS from mic
+let micStarted = false;
+const history = [];
+
+const statusEl = document.getElementById("status");
+const captionEl = document.getElementById("caption");
+const hintEl = document.getElementById("hint");
+const micBtn = document.getElementById("mic");
+
+function setState(next) {
+  if (state === next) return;
+  state = next;
+  stateEnteredAt = performance.now();
+  renderStatus();
 }
 
-/* ---------- Render ---------- */
+function renderStatus() {
+  const labels = {
+    [STATE.IDLE]: "",
+    [STATE.DORMANT]: "Say “my boi”",
+    [STATE.LISTENING]: "Listening",
+    [STATE.USER_SPEAKING]: "",
+    [STATE.PROCESSING]: "Thinking",
+    [STATE.AI_SPEAKING]: "Speaking",
+    [STATE.MUTED]: "Muted",
+  };
+  const label = labels[state];
+  if (label) {
+    statusEl.textContent = label;
+    statusEl.classList.add("show");
+    statusEl.classList.toggle(
+      "accent",
+      state === STATE.LISTENING || state === STATE.USER_SPEAKING,
+    );
+  } else {
+    statusEl.classList.remove("show");
+  }
+}
 
-function render() {
-  t += 0.016;
-  angle += rotSpeed;
+function setCaption(kind, text) {
+  if (!text) {
+    captionEl.classList.remove("show", "user", "bot", "error");
+    return;
+  }
+  captionEl.textContent = text;
+  captionEl.classList.remove("user", "bot", "error");
+  captionEl.classList.add("show", kind);
+}
 
-  // slight trail; clear color matches body background
-  ctx.fillStyle =
-    mode === "happy" ? "rgba(255, 255, 255, 0.25)" : "rgba(0, 0, 0, 0.22)";
+// ---------- Render loop ----------
+let t = 0;
+let angle = 0;
+let rotSpeed = 0.003;
+let lastTime = performance.now();
+
+function render(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+  t += dt;
+
+  ctx.fillStyle = "rgba(5, 6, 8, 0.24)";
   ctx.fillRect(0, 0, W, H);
 
+  // State-driven visual params.
+  let scale = 1;
+  let wobbleAmp = 0.08;
+  let pulseAmp = 0;
+  let chaos = 0;
+  let brightness = 0.55;
+  let baseHue = 218;
+  let hueSpread = 40;
+
+  switch (state) {
+    case STATE.IDLE:
+      scale = 1 + Math.sin(t * 0.7) * 0.015;
+      wobbleAmp = 0.07;
+      brightness = 0.45;
+      rotSpeed = 0.0025;
+      break;
+    case STATE.DORMANT:
+      // Quiet-but-alive: dimmer than IDLE, a hair cooler in hue, slow
+      // breathing rotation so it reads as "waiting for its name".
+      scale = 0.94 + Math.sin(t * 0.6) * 0.012;
+      wobbleAmp = 0.045;
+      brightness = 0.3;
+      baseHue = 215;
+      hueSpread = 18;
+      rotSpeed = 0.0022;
+      break;
+    case STATE.LISTENING:
+      scale = 0.96 + Math.sin(t * 1.2) * 0.02;
+      wobbleAmp = 0.06;
+      brightness = 0.65;
+      baseHue = 205;
+      rotSpeed = 0.004;
+      break;
+    case STATE.USER_SPEAKING: {
+      const a = Math.min(1, amplitude * 3);
+      scale = 1.02 + a * 0.22 + Math.sin(t * 1.6) * 0.015;
+      wobbleAmp = 0.18 + a * 0.6;
+      chaos = 0.4 + a * 0.9;
+      brightness = 0.85;
+      baseHue = 196;
+      hueSpread = 60;
+      rotSpeed = 0.008 + a * 0.012;
+      break;
+    }
+    case STATE.PROCESSING: {
+      // Ramp intensity the longer we sit in PROCESSING so a short think
+      // stays calm and a long think visibly "works harder".
+      const dwell = (now - stateEnteredAt) / 1000;
+      const intensity = Math.min(1, Math.max(0, (dwell - 0.3) / 1.5));
+      scale = 0.78 + Math.sin(t * (3 + intensity * 2.5)) * (0.04 + intensity * 0.03);
+      wobbleAmp = 0.05 + intensity * 0.05;
+      brightness = 0.7 + intensity * 0.18;
+      baseHue = 258 - intensity * 14;
+      hueSpread = 40 + intensity * 20;
+      rotSpeed = 0.05 + intensity * 0.08;
+      break;
+    }
+    case STATE.AI_SPEAKING: {
+      const pulse = Math.sin(t * 3.4) * 0.5 + 0.5;
+      const a = Math.min(1, amplitude * 3);
+      scale = 1.05 + pulse * 0.18 + a * 0.08;
+      pulseAmp = pulse * 0.22;
+      wobbleAmp = 0.12 + a * 0.18;
+      brightness = 0.9;
+      baseHue = 222;
+      hueSpread = 50;
+      rotSpeed = 0.005;
+      break;
+    }
+    case STATE.MUTED:
+      scale = 0.9 + Math.sin(t * 0.5) * 0.01;
+      wobbleAmp = 0.04;
+      brightness = 0.18;
+      baseHue = 230;
+      hueSpread = 10;
+      rotSpeed = 0.002;
+      break;
+  }
+
+  // Drone-show morph: migrate each particle's base position toward the
+  // target shape's slot. When the hold elapses we ease back to sphere.
+  if (now >= shapeHoldUntil && shapeTarget !== "sphere") {
+    shapeTarget = "sphere";
+  }
+  const shapeActive = shapeTarget !== "sphere";
+  const targetCloud = shapes[shapeTarget];
+  const kMigrate = shapeActive ? 0.065 : 0.045;
+  for (let i = 0; i < N; i++) {
+    const p = particles[i];
+    p.bx += (targetCloud[i][0] - p.bx) * kMigrate;
+    p.by += (targetCloud[i][1] - p.by) * kMigrate;
+    p.bz += (targetCloud[i][2] - p.bz) * kMigrate;
+  }
+  if (shapeActive) {
+    // Quieten the motion so the shape reads cleanly.
+    wobbleAmp *= 0.35;
+    chaos *= 0.15;
+    pulseAmp *= 0.45;
+    rotSpeed *= 0.35;
+    const style = SHAPE_STYLE[shapeTarget];
+    if (style) {
+      baseHue = style.hue;
+      hueSpread = style.spread;
+    }
+    brightness = Math.max(brightness, 0.85);
+  }
+
+  angle += rotSpeed;
   const sa = Math.sin(angle);
   const ca = Math.cos(angle);
 
   for (let i = 0; i < N; i++) {
     const p = particles[i];
+    const wob =
+      1 +
+      wobbleAmp *
+        (Math.sin(p.bx * 2.6 + t * 1.2 + p.jitter) *
+           Math.cos(p.by * 2.6 + t * 0.9) +
+          Math.sin(p.bz * 3 + t * 0.7) * 0.45) +
+      pulseAmp * Math.sin(t * 3 + p.phase * Math.PI * 2);
 
-    // compute target position
-    if (mode === "blob") {
-      const wob =
-        1 +
-        intensity *
-          (Math.sin(p.bx * 3 + t * 1.2 + p.jitter) *
-           Math.cos(p.by * 3 + t * 0.9) +
-           Math.sin(p.bz * 4 + t * 0.7) * 0.4);
-      p.tx = p.bx * wob;
-      p.ty = p.by * wob;
-      p.tz = p.bz * wob;
-    } else if (mode === "face") {
-      const f = face[i];
-      const breathe = 1 + 0.02 * Math.sin(t * 2 + p.jitter);
-      p.tx = f[0] * breathe;
-      p.ty = f[1] * breathe;
-      p.tz = f[2];
-    } else {
-      // happy: heart shape, gentle pulse
-      const h = heart[i];
-      const pulse = 1 + 0.035 * Math.sin(t * 2.4 + p.jitter);
-      p.tx = h.x * pulse;
-      p.ty = h.y * pulse;
-      p.tz = h.z;
-    }
+    const ch = chaos > 0
+      ? chaos * Math.sin(p.bx * 7 + t * 5 + p.jitter * 3) * 0.06
+      : 0;
 
-    // ease toward target
-    const k = mode === "blob" ? 0.08 : 0.07;
+    p.tx = p.bx * (wob + ch) * scale;
+    p.ty = p.by * (wob + ch) * scale;
+    p.tz = p.bz * (wob + ch) * scale;
+
+    const k = 0.08;
     p.x += (p.tx - p.x) * k;
     p.y += (p.ty - p.y) * k;
     p.z += (p.tz - p.z) * k;
 
-    // rotate around Y axis
     const rx = p.x * ca - p.z * sa;
     const rz = p.x * sa + p.z * ca;
-
-    // perspective project
-    const persp = 2.2 / (2.2 + rz);
+    const persp = 2.4 / (2.4 + rz);
     const sx = CX + rx * R * persp;
     const sy = CY + p.y * R * persp;
+    const depth = (rz + 1) / 2;
 
-    const depth = (rz + 1) / 2;             // 0 back, 1 front
-    let hue, sat, light, alpha;
-    if (mode === "happy") {
-      const side = heart[i].side;
-      if (side === "left") {       // navy
-        hue = 212; sat = 62; light = 28 + depth * 12;
-      } else {                     // red
-        hue = 4;   sat = 75; light = 46 + depth * 10;
-      }
-      alpha = 0.75 + depth * 0.2;
-    } else {
-      // cyan front → purple back
-      hue = 260 - depth * 70;
-      sat = 85;
-      light = 55 + depth * 15;
-      alpha = 0.35 + depth * 0.5;
-    }
+    const hue = baseHue - depth * hueSpread;
+    const light = 45 + depth * 20;
+    const alpha = (0.25 + depth * 0.6) * brightness;
+    const size = (1.05 + depth * 0.3) * persp * DPR;
 
-    const size = 1.2 * persp * DPR;
-    ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+    ctx.fillStyle = `hsla(${hue}, 70%, ${light}%, ${alpha})`;
     ctx.beginPath();
     ctx.arc(sx, sy, size, 0, Math.PI * 2);
     ctx.fill();
@@ -222,66 +444,296 @@ function render() {
 
   requestAnimationFrame(render);
 }
-render();
+requestAnimationFrame(render);
 
-/* ---------- Voice flow ---------- */
-
+// ---------- Speech recognition ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const history = [];
-let busy = false;
+let rec = null;
+let recRunning = false;
+let partialTranscript = "";
+let finalTranscript = "";
+let silenceTimer = null;
+// Backup only — primary endpointing is amplitude-based (see pollAmplitude).
+// If VAD misses (weird mic noise floor), this timer still fires the turn.
+const SILENCE_MS = 350;
 
-function setBusy(v) {
-  busy = v;
-  micBtn.classList.toggle("busy", v);
-}
+function createRecognition() {
+  if (!SR) return null;
+  const r = new SR();
+  r.continuous = true;
+  r.interimResults = true;
+  r.lang = "en-US";
 
-function setListening(v) {
-  micBtn.classList.toggle("listening", v);
-}
+  r.onresult = (e) => {
+    if (state === STATE.AI_SPEAKING || state === STATE.MUTED) return;
+    let interim = "";
+    let finals = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i];
+      if (res.isFinal) finals += res[0].transcript;
+      else interim += res[0].transcript;
+    }
+    if (finals) finalTranscript += finals;
+    partialTranscript = interim;
 
-async function listenOnce(onInterim) {
-  return new Promise((resolve, reject) => {
-    if (!SR) return reject(new Error("speech-not-supported"));
-    const rec = new SR();
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = "en-US";
+    const full = (finalTranscript + " " + partialTranscript).trim();
+    if (!full) return;
 
-    let finalText = "";
-    rec.onresult = (e) => {
-      let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += t;
-        else interim += t;
+    // Wake-word gate: while dormant, we transcribe but stay silent until
+    // the hotword hits. Anything the user says after "my boi" in the same
+    // utterance becomes the actual turn, so "my boi how's the academy?"
+    // wakes us and asks in one breath.
+    if (state === STATE.DORMANT) {
+      const m = full.match(WAKE_RE);
+      if (m) {
+        const after = full.slice(m.index + m[0].length).trim();
+        finalTranscript = after;
+        partialTranscript = "";
+        if (after) {
+          setState(STATE.USER_SPEAKING);
+          setCaption("user", after);
+          resetSilenceTimer();
+        } else {
+          setState(STATE.LISTENING);
+        }
+      } else if (finalTranscript.length > 160) {
+        // Keep the pre-wake buffer small so stale finals don't drown the
+        // hotword scan on long dormant stretches.
+        finalTranscript = finalTranscript.slice(-80);
       }
-      if (onInterim) onInterim((finalText + interim).trim());
-    };
-    rec.onerror = (e) => reject(new Error(e.error));
-    rec.onend = () => {
-      if (finalText.trim()) resolve(finalText.trim());
-      else reject(new Error("no-speech"));
-    };
-    rec.start();
-  });
+      return;
+    }
+
+    if (state !== STATE.USER_SPEAKING) setState(STATE.USER_SPEAKING);
+    setCaption("user", full);
+    resetSilenceTimer();
+  };
+
+  r.onerror = (e) => {
+    if (e.error !== "no-speech" && e.error !== "aborted") {
+      console.warn("speech error", e.error);
+    }
+  };
+
+  r.onend = () => {
+    recRunning = false;
+    if (!muted && state !== STATE.AI_SPEAKING && state !== STATE.PROCESSING) {
+      try { r.start(); recRunning = true; } catch {}
+    }
+  };
+
+  return r;
 }
 
-/* ---------- Caption / talking bubble ---------- */
+function startRec() {
+  if (!rec) rec = createRecognition();
+  if (!rec || recRunning) return;
+  try { rec.start(); recRunning = true; } catch {}
+}
 
-const captionEl = document.getElementById("caption");
-
-function setCaption(who, text) {
-  if (!who || !text) {
-    captionEl.classList.remove("show", "user", "bot");
-    return;
+function stopRec() {
+  if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+  if (rec && recRunning) {
+    try { rec.stop(); } catch {}
+    recRunning = false;
   }
-  captionEl.textContent = text;
-  captionEl.classList.remove("user", "bot");
-  captionEl.classList.add("show", who);
 }
 
-async function chat(text) {
-  history.push({ role: "user", content: text });
+function resetSilenceTimer() {
+  if (silenceTimer) clearTimeout(silenceTimer);
+  silenceTimer = setTimeout(() => {
+    const text = (finalTranscript + " " + partialTranscript).trim();
+    if (text && state === STATE.USER_SPEAKING) sendTurn(text);
+  }, SILENCE_MS);
+}
+
+// ---------- Audio / VAD ----------
+let audioCtx = null;
+let analyser = null;
+let dataArray = null;
+let micStream = null;
+let interruptCount = 0;
+// Endpoint-detection: once the user has said something and the mic goes
+// quiet for ~230ms, fire the turn immediately — don't wait out the full
+// silence timer. Amplitude drops faster than SpeechRecognition's "final"
+// event, which is where most of the perceived lag lives.
+let vadQuietFrames = 0;
+const VAD_QUIET_THRESHOLD = 0.035;
+const VAD_QUIET_FRAMES_NEEDED = 14;
+
+async function initMic() {
+  if (micStarted) return true;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (err) {
+    setCaption("error", "Microphone access denied. Allow mic and reload.");
+    return false;
+  }
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(micStream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.6;
+  src.connect(analyser);
+  dataArray = new Uint8Array(analyser.fftSize);
+
+  micStarted = true;
+  hintEl.classList.add("hidden");
+  pollAmplitude();
+  return true;
+}
+
+function pollAmplitude() {
+  if (!analyser) return;
+  analyser.getByteTimeDomainData(dataArray);
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) {
+    const v = (dataArray[i] - 128) / 128;
+    sum += v * v;
+  }
+  const rms = Math.sqrt(sum / dataArray.length);
+  amplitude = amplitude * 0.75 + rms * 0.25;
+
+  // Interruption: require a sustained spike while bot is speaking.
+  if (state === STATE.AI_SPEAKING) {
+    if (amplitude > 0.14) interruptCount++;
+    else interruptCount = Math.max(0, interruptCount - 1);
+    if (interruptCount > 8) {
+      interruptCount = 0;
+      interruptAI();
+    }
+  } else {
+    interruptCount = 0;
+  }
+
+  // Endpointing: user has something transcribed + mic has been quiet
+  // long enough → fire the turn before the silence timer would.
+  if (state === STATE.USER_SPEAKING) {
+    const text = (finalTranscript + " " + partialTranscript).trim();
+    if (text.length >= 2 && amplitude < VAD_QUIET_THRESHOLD) {
+      vadQuietFrames++;
+      if (vadQuietFrames >= VAD_QUIET_FRAMES_NEEDED) {
+        vadQuietFrames = 0;
+        if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+        sendTurn(text);
+      }
+    } else {
+      vadQuietFrames = 0;
+    }
+  } else {
+    vadQuietFrames = 0;
+  }
+
+  requestAnimationFrame(pollAmplitude);
+}
+
+// ---------- Conversation turn ----------
+let currentAudio = null;
+let currentSpeakResolve = null;
+let turnInFlight = false;
+// Monotonic turn id. Bumped on every new turn, interrupt, or mute — any
+// in-flight fetch or queued speakChunk checks this and bails if it has
+// been superseded, so a cancelled turn can't stomp on the next one.
+let turnToken = 0;
+
+// Tear down any in-flight TTS so a new one can start cleanly. Without this,
+// an interrupted audio.pause() never fires onended, the old speak() promise
+// hangs, and two TTS streams can overlap on the next turn.
+function killCurrentSpeech() {
+  if (currentAudio) {
+    try { currentAudio.pause(); } catch {}
+    currentAudio.onended = null;
+    currentAudio.onerror = null;
+    currentAudio.ontimeupdate = null;
+    currentAudio.onplaying = null;
+    currentAudio = null;
+  }
+  if (currentSpeakResolve) {
+    const r = currentSpeakResolve;
+    currentSpeakResolve = null;
+    r();
+  }
+}
+
+async function sendTurn(text) {
+  if (turnInFlight) return;
+  if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+  const userText = text.trim();
+  if (!userText) return;
+
+  turnInFlight = true;
+  const myToken = ++turnToken;
+  killCurrentSpeech();
+  stopRec();
+  finalTranscript = "";
+  partialTranscript = "";
+  setState(STATE.PROCESSING);
+  setCaption("user", userText);
+
+  try {
+    await streamReply(userText, myToken);
+  } catch (err) {
+    console.warn(err);
+    setCaption("error", `Error: ${err.message || err}`);
+    setTimeout(() => setCaption(null), 4000);
+  } finally {
+    turnInFlight = false;
+    currentAudio = null;
+    if (!muted && myToken === turnToken) {
+      // After a turn finishes we drop back to DORMANT so the mic doesn't
+      // pick up ambient chatter as the next question. User has to say
+      // "my boi" again to reopen.
+      setState(STATE.DORMANT);
+      startRec();
+    }
+  }
+}
+
+function interruptAI() {
+  turnToken++; // invalidate any queued speakChunks from the current turn
+  killCurrentSpeech();
+  setCaption(null);
+  setState(STATE.DORMANT);
+  finalTranscript = "";
+  partialTranscript = "";
+  startRec();
+}
+
+// Sentence splitter: pulls out complete sentences as they stream in.
+// A sentence is anything ending in a run of .!?… followed by whitespace.
+// End-of-buffer is intentionally NOT a boundary — mid-stream the tail
+// might still be growing, so we only flush it at end-of-stream via the
+// explicit pending.trim() path. Short fragments are ignored.
+const SENTENCE_RE = /(.+?[.!?…]+)\s+/gs;
+
+function extractSentences(buffer) {
+  const out = [];
+  let lastIdx = 0;
+  SENTENCE_RE.lastIndex = 0;
+  let m;
+  while ((m = SENTENCE_RE.exec(buffer)) !== null) {
+    const s = m[1].trim();
+    if (s.length > 1) out.push(s);
+    lastIdx = SENTENCE_RE.lastIndex;
+  }
+  return { sentences: out, remainder: buffer.slice(lastIdx) };
+}
+
+// The heart of the latency win: while Claude is still streaming tokens
+// back, we slice off each complete sentence and fire /api/tts on it
+// immediately. Playback is chained serially via speakChain, so sentence 2
+// starts the instant sentence 1's audio ends — even if Claude is still
+// generating sentence 3 in the background.
+async function streamReply(userText, myToken) {
+  history.push({ role: "user", content: userText });
+
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -296,12 +748,26 @@ async function chat(text) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  let reply = "";
-  let mood = "neutral";
+  let pending = "";
+  let fullReply = "";
+  let speakChain = Promise.resolve();
+
+  const enqueue = (sentence) => {
+    const s = sentence.trim();
+    if (!s) return;
+    speakChain = speakChain.then(() => {
+      if (myToken !== turnToken) return;
+      return speakChunk(s, myToken);
+    });
+  };
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
+    if (myToken !== turnToken) {
+      try { reader.cancel(); } catch {}
+      break;
+    }
     buf += decoder.decode(value, { stream: true });
     let nl;
     while ((nl = buf.indexOf("\n")) !== -1) {
@@ -311,83 +777,160 @@ async function chat(text) {
       let msg;
       try { msg = JSON.parse(line); } catch { continue; }
       if (msg.type === "text") {
-        reply += msg.delta;
+        fullReply += msg.delta;
+        pending += msg.delta;
+        const { sentences, remainder } = extractSentences(pending);
+        pending = remainder;
+        for (const s of sentences) enqueue(s);
       } else if (msg.type === "done") {
-        reply = msg.text;
-        mood = msg.mood;
+        // server sends the final cleaned text (stripped of internal markers)
+        fullReply = msg.text;
       } else if (msg.type === "error") {
         throw new Error(msg.error);
       }
     }
   }
 
-  history.push({ role: "assistant", content: reply });
-  return { reply, mood };
-}
+  // Flush whatever is left in `pending` (last sentence if it didn't end
+  // with punctuation, or a tail fragment).
+  if (pending.trim()) enqueue(pending);
 
-// OpenAI TTS — realistic voice with SA-accent instructions.
-async function speak(text) {
-  if (!text) return;
-  const res = await fetch("/api/tts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) throw new Error(`tts ${res.status}`);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const audio = new Audio(url);
-  return new Promise((resolve) => {
-    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.play();
-  });
-}
+  await speakChain;
 
-async function runTurn() {
-  if (busy) return;
-  try {
-    setBusy(true);
-    setListening(true);
-    setMode("blob");
-    intensity = 0.28;
-    rotSpeed = 0.008;
-
-    setCaption("user", "Listening...");
-    const userText = await listenOnce((live) => {
-      setCaption("user", live || "Listening...");
-    });
-    setListening(false);
-
-    intensity = 0.18;
-    rotSpeed = 0.012;
-
-    const { reply, mood } = await chat(userText);
-
-    // morph to face, or heart if mood is happy; show the reply text
-    setMode(mood === "happy" ? "happy" : "face");
-    rotSpeed = 0;
-    setCaption("bot", reply);
-    await speak(reply);
-
-    // linger briefly, then fade
-    setTimeout(() => setCaption(null), 600);
-
-    // return to blob
-    setMode("blob");
-    intensity = 0.15;
-    rotSpeed = 0.004;
-  } catch (e) {
-    setListening(false);
-    setMode("blob");
-    intensity = 0.15;
-    rotSpeed = 0.004;
-    setCaption("bot", `⚠ ${e.message || e}`);
-    setTimeout(() => setCaption(null), 5000);
-    console.warn(e);
-  } finally {
-    setBusy(false);
+  if (myToken === turnToken) {
+    setCaption(null);
+    history.push({ role: "assistant", content: fullReply });
   }
 }
 
-micBtn.addEventListener("click", runTurn);
+// One sentence in → MP3 out → plays. Called in sequence by streamReply
+// so the audio chunks stitch together without gaps. myToken is the turn's
+// identity; if it changes mid-flight (interrupt, mute, new turn) we bail.
+async function speakChunk(text, myToken) {
+  if (!text) return;
+  if (myToken !== turnToken) return;
+
+  // Pull shape cues out of the chunk and remember roughly where each sits
+  // in the spoken word stream, so we can fire the morph in time with the
+  // voice. The cleaned text (tags removed) is what we display and play.
+  const cues = [];
+  const cleanWords = [];
+  const tokens = text.split(/(<shape\s+type="[^"]*"\s*\/>)/g);
+  for (const tok of tokens) {
+    if (!tok) continue;
+    const m = tok.match(/^<shape\s+type="([^"]*)"\s*\/>$/);
+    if (m) {
+      cues.push({ shape: m[1], atWord: cleanWords.length });
+    } else {
+      for (const w of tok.split(/\s+/)) {
+        if (w) cleanWords.push(w);
+      }
+    }
+  }
+  const cleanText = cleanWords.join(" ");
+  if (!cleanText) return;
+
+  const res = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: cleanText }),
+  });
+  if (!res.ok) throw new Error(`tts ${res.status}`);
+  if (myToken !== turnToken) return;
+  const blob = await res.blob();
+  if (myToken !== turnToken) return;
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  currentAudio = audio;
+
+  // Rolling subtitle: the caption only ever shows the last few words the
+  // bot is actively speaking. Older words fall off the left, new ones
+  // slide in on the right, and the whole thing fades out when audio ends.
+  const WINDOW = 3;
+  let lastShown = -1;
+  let cueIdx = 0;
+
+  const pulseCaption = () => {
+    captionEl.classList.remove("pulse");
+    // Force reflow so the animation restarts on every word change.
+    void captionEl.offsetWidth;
+    captionEl.classList.add("pulse");
+  };
+
+  return new Promise((resolve) => {
+    currentSpeakResolve = resolve;
+    const finish = () => {
+      if (currentSpeakResolve === resolve) currentSpeakResolve = null;
+      if (currentAudio === audio) currentAudio = null;
+      URL.revokeObjectURL(url);
+      resolve();
+    };
+    audio.onplaying = () => {
+      if (state !== STATE.AI_SPEAKING) setState(STATE.AI_SPEAKING);
+    };
+    audio.ontimeupdate = () => {
+      if (!audio.duration || !isFinite(audio.duration)) return;
+      const frac = Math.min(1, audio.currentTime / audio.duration);
+      const n = Math.max(1, Math.ceil(frac * cleanWords.length));
+      if (n !== lastShown) {
+        lastShown = n;
+        const start = Math.max(0, n - WINDOW);
+        setCaption("bot", cleanWords.slice(start, n).join(" "));
+        pulseCaption();
+      }
+      while (cueIdx < cues.length && n >= cues[cueIdx].atWord) {
+        morphTo(cues[cueIdx].shape);
+        cueIdx++;
+      }
+    };
+    // Only wipe the caption between chunks if the next chunk hasn't
+    // already taken over — avoid a visible flicker at sentence seams.
+    audio.onended = () => { finish(); };
+    audio.onerror = () => { finish(); };
+    audio.play().catch(() => finish());
+  });
+}
+
+// ---------- UI wiring ----------
+async function start() {
+  const ok = await initMic();
+  if (!ok) return;
+  muted = false;
+  micBtn.setAttribute("aria-pressed", "true");
+  micBtn.classList.add("active");
+  setState(STATE.DORMANT);
+  startRec();
+}
+
+function toggleMute() {
+  muted = !muted;
+  if (muted) {
+    micBtn.setAttribute("aria-pressed", "false");
+    micBtn.classList.remove("active");
+    stopRec();
+    killCurrentSpeech();
+    setState(STATE.MUTED);
+    setCaption(null);
+  } else {
+    micBtn.setAttribute("aria-pressed", "true");
+    micBtn.classList.add("active");
+    if (!micStarted) { start(); return; }
+    setState(STATE.DORMANT);
+    startRec();
+  }
+}
+
+micBtn.addEventListener("click", () => {
+  if (!micStarted) start();
+  else toggleMute();
+});
+
+canvas.addEventListener("click", () => {
+  if (!micStarted) start();
+});
+
+if (!SR) {
+  setCaption("error", "SpeechRecognition not supported in this browser. Try Chrome or Edge.");
+}
+
+renderStatus();
