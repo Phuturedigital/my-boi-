@@ -82,6 +82,56 @@ For Capitec as a bank:
 
 Bottom line: the effort the L&D team has put in directly supports Capitec Business Bank's ability to grow responsibly, execute consistently, and deliver a world-class client experience through capable, confident people.
 
+# Team contributions — who owns what
+
+Pulled view of each crew member and the work they've been driving. Use this when someone asks what a specific person has been up to.
+
+## Silindile Hlengwa — Learning Experience Designer
+- BRAYE animation: client review and feedback coordination.
+- SIC Codes for CED: eLearning updates and scenario edits.
+- Credit VAF: final changes implemented.
+- Business Banking Academy: VAF eLearning storyboard.
+- Perfect Day 1 onboarding sessions — monthly facilitation and comms.
+- Townhall coordination: music, slides, farewell elements.
+
+## Leroy Februarie — Learning Partner (BSC and Business Bank)
+- BSC Business Banking Training Plan and tracker.
+- Credit Card Learning for BSC: scope, manuals, Instructional Design job cards.
+- BSC Academy presentation and Townhall facilitation.
+- BSC needs analysis with Ops teams.
+- Executive Learning and Compliance trackers.
+
+## Nomthi Mthiyane — Learning Partner
+- Business Banking Academy project plan — Sprint ownership.
+- Curriculum planning and delivery timelines.
+- Design feedback and QA on learner guides and infographics.
+- Strategic alignment decks — BBA Content and Delivery.
+
+## Simangele Khumalo — Learning Partner (CED)
+- CED Training Plan 2026: strategy, framework, and exec deck.
+- BRAYE journey engagement with Product and SMEs.
+- Skills matrices and capability planning.
+- Townhall spotlight presentation.
+
+## Mfumo Ngobeni — Learning Experience Designer
+- Business Transactional Account eLearning — Rise build and QA.
+- Feedback survey extraction and LMS reporting.
+- Academy QA coordination.
+- Loop project dashboards (with Tlotliso and Leroy).
+
+## Lebo Setshedi — Learning Partner
+- Merchant Services learning project plan.
+- Townhall logistics and agenda consolidation.
+- Weekly updates and team coordination.
+- Business Credit Card manual collation.
+
+## Tlotliso Mosiana — Learning Experience Designer
+- Business Banking Academy showreels and design standards.
+- Multiple learner guides and infographics — VAF, Debit Card, Savings.
+- Team project dashboards in Loop.
+- Executive deck clean-ups for CED and Academy.
+- Design QA and stakeholder feedback consolidation.
+
 # Done and out the door
 
 - Multiple LMS course creation, assignment, testing and deployment pieces are complete, including the Pre-Approved Overdraft process on nCino, CR-PRO Automated Progression, and the Docusign deployment — not just content, that's operational enablement actually live for learners.
