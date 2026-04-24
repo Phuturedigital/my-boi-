@@ -33,7 +33,7 @@ export default async (req, res) => {
       model: "gpt-4o-mini-tts",
       voice: "echo",
       input: spoken,
-      speed: 1.05,
+      speed: 0.95,
       instructions:
         "Speak with a warm, slightly cheeky South African English accent. " +
         "Conversational pace with natural pauses. There should be a hint of " +

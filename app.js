@@ -436,7 +436,7 @@ let recRunning = false;
 let partialTranscript = "";
 let finalTranscript = "";
 let silenceTimer = null;
-const SILENCE_MS = 600;
+const SILENCE_MS = 450;
 
 function createRecognition() {
   if (!SR) return null;
