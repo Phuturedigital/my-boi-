@@ -39,7 +39,9 @@ export default async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  const apiKey = Netlify.env.get("ANTHROPIC_API_KEY");
+  const apiKey =
+    globalThis.Netlify?.env?.get?.("ANTHROPIC_API_KEY") ||
+    globalThis.Deno?.env?.get?.("ANTHROPIC_API_KEY");
   if (!apiKey) {
     return jsonResponse({ error: "ANTHROPIC_API_KEY not set in Netlify env vars" }, 500);
   }
