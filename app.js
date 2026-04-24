@@ -282,17 +282,45 @@ function setCaption(who, text) {
 
 async function chat(text) {
   history.push({ role: "user", content: text });
-  const res = await fetch("/.netlify/functions/chat", {
+  const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages: history }),
   });
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     let detail = "";
     try { detail = (await res.json()).error || ""; } catch {}
     throw new Error(`chat ${res.status}${detail ? ": " + detail : ""}`);
   }
-  const { text: reply, mood } = await res.json();
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let reply = "";
+  let mood = "neutral";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      if (msg.type === "text") {
+        reply += msg.delta;
+      } else if (msg.type === "done") {
+        reply = msg.text;
+        mood = msg.mood;
+      } else if (msg.type === "error") {
+        throw new Error(msg.error);
+      }
+    }
+  }
+
   history.push({ role: "assistant", content: reply });
   return { reply, mood };
 }
