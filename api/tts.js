@@ -18,8 +18,11 @@ export default async (req, res) => {
   }
 
   // Strip emoji/pictographs so TTS doesn't try to verbalise them
-  // ("face with tears of joy" is not a vibe). Collapse stray whitespace.
+  // ("face with tears of joy" is not a vibe). Also drop any inline shape
+  // cue tags — those are handled by the frontend as visual beats and must
+  // never hit the voice. Collapse stray whitespace.
   const spoken = text
+    .replace(/<shape\s+type="[^"]*"\s*\/>/g, "")
     .replace(/\p{Extended_Pictographic}/gu, "")
     .replace(/\s+/g, " ")
     .trim();

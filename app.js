@@ -40,7 +40,162 @@ function fibSphere(n) {
   return pts;
 }
 
-const base = fibSphere(N);
+// Normalize a point cloud so its widest extent sits within [-1, 1].
+function normalizeCloud(pts) {
+  let maxR = 0;
+  for (const [x, y, z] of pts) {
+    const r = Math.max(Math.abs(x), Math.abs(y), Math.abs(z));
+    if (r > maxR) maxR = r;
+  }
+  if (maxR === 0) return pts;
+  return pts.map(([x, y, z]) => [x / maxR, y / maxR, z / maxR]);
+}
+
+// Deterministic pseudo-random so shapes render identically each reload.
+function seededRand(seed) {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 0xffffffff;
+  };
+}
+
+// Classic parametric heart — point at bottom, cusp at top.
+// Screen-space y goes down so we flip the traditional equation.
+function heartShape(n) {
+  const rng = seededRand(7);
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    const shell = i % 4;
+    const scale = 1 - shell * 0.12;
+    const x = 16 * Math.pow(Math.sin(t), 3) * scale;
+    const yv =
+      13 * Math.cos(t) -
+      5 * Math.cos(2 * t) -
+      2 * Math.cos(3 * t) -
+      Math.cos(4 * t);
+    const y = -yv * scale;
+    const z = (rng() - 0.5) * 6 * (1 - shell * 0.2);
+    pts.push([x, y, z]);
+  }
+  return normalizeCloud(pts);
+}
+
+// Rocket pointing up: nose cone at top, body, tail fins, flame below.
+function rocketShape(n) {
+  const rng = seededRand(11);
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const sect = rng();
+    let x, y, z;
+    if (sect < 0.5) {
+      // cylindrical body
+      y = -0.5 + rng() * 1.0;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.22 + rng() * 0.02;
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else if (sect < 0.72) {
+      // nose cone up top (negative y)
+      const tt = rng();
+      y = -0.5 - tt * 0.5;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.24 * (1 - tt);
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else if (sect < 0.9) {
+      // four fins flared at the base
+      const finIdx = Math.floor(rng() * 4);
+      const theta = (finIdx / 4) * Math.PI * 2;
+      const tY = rng();
+      y = 0.3 + tY * 0.25;
+      const rad = 0.22 + (1 - tY) * 0.28 * rng();
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else {
+      // flame exhaust
+      const tt = rng();
+      y = 0.55 + tt * 0.4;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.16 * (1 - tt) * rng();
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    }
+    pts.push([x, y, z]);
+  }
+  return normalizeCloud(pts);
+}
+
+// Trophy: cup on top, two side handles, stem, plinth base.
+function trophyShape(n) {
+  const rng = seededRand(19);
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const sect = rng();
+    let x, y, z;
+    if (sect < 0.42) {
+      // cup — tapered bowl, widest at top rim
+      const tt = rng();
+      y = -1 + tt * 0.7;
+      const rad = 0.3 + tt * 0.3;
+      const theta = rng() * Math.PI * 2;
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else if (sect < 0.62) {
+      // two side handles — vertical arcs on left/right
+      const side = rng() < 0.5 ? 1 : -1;
+      const phi = (rng() - 0.5) * Math.PI * 1.1;
+      const cx = side * 0.55;
+      const cy = -0.6;
+      x = cx + side * 0.22 * Math.cos(phi);
+      y = cy + 0.32 * Math.sin(phi);
+      z = (rng() - 0.5) * 0.08;
+    } else if (sect < 0.82) {
+      // stem
+      y = -0.3 + rng() * 0.7;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.08;
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    } else {
+      // base plinth
+      const tt = rng();
+      y = 0.4 + tt * 0.3;
+      const theta = rng() * Math.PI * 2;
+      const rad = 0.42 - tt * 0.05;
+      x = Math.cos(theta) * rad;
+      z = Math.sin(theta) * rad;
+    }
+    pts.push([x, y, z]);
+  }
+  return normalizeCloud(pts);
+}
+
+const shapes = {
+  sphere: fibSphere(N),
+  heart: heartShape(N),
+  rocket: rocketShape(N),
+  trophy: trophyShape(N),
+};
+
+// Per-shape palette overrides while morphed.
+const SHAPE_STYLE = {
+  heart: { hue: 342, spread: 28 },
+  rocket: { hue: 28, spread: 48 },
+  trophy: { hue: 48, spread: 26 },
+};
+
+let shapeTarget = "sphere";
+let shapeHoldUntil = 0;
+
+function morphTo(shape, hold = 2400) {
+  if (!shapes[shape] || shape === "sphere") return;
+  shapeTarget = shape;
+  shapeHoldUntil = performance.now() + hold;
+}
+
+const base = shapes.sphere;
 const particles = [];
 for (let i = 0; i < N; i++) {
   const [x, y, z] = base[i];
@@ -195,6 +350,34 @@ function render(now) {
       hueSpread = 10;
       rotSpeed = 0.002;
       break;
+  }
+
+  // Drone-show morph: migrate each particle's base position toward the
+  // target shape's slot. When the hold elapses we ease back to sphere.
+  if (now >= shapeHoldUntil && shapeTarget !== "sphere") {
+    shapeTarget = "sphere";
+  }
+  const shapeActive = shapeTarget !== "sphere";
+  const targetCloud = shapes[shapeTarget];
+  const kMigrate = shapeActive ? 0.065 : 0.045;
+  for (let i = 0; i < N; i++) {
+    const p = particles[i];
+    p.bx += (targetCloud[i][0] - p.bx) * kMigrate;
+    p.by += (targetCloud[i][1] - p.by) * kMigrate;
+    p.bz += (targetCloud[i][2] - p.bz) * kMigrate;
+  }
+  if (shapeActive) {
+    // Quieten the motion so the shape reads cleanly.
+    wobbleAmp *= 0.35;
+    chaos *= 0.15;
+    pulseAmp *= 0.45;
+    rotSpeed *= 0.35;
+    const style = SHAPE_STYLE[shapeTarget];
+    if (style) {
+      baseHue = style.hue;
+      hueSpread = style.spread;
+    }
+    brightness = Math.max(brightness, 0.85);
   }
 
   angle += rotSpeed;
@@ -384,12 +567,35 @@ function pollAmplitude() {
 
 // ---------- Conversation turn ----------
 let currentAudio = null;
+let currentSpeakResolve = null;
+let turnInFlight = false;
+
+// Tear down any in-flight TTS so a new one can start cleanly. Without this,
+// an interrupted audio.pause() never fires onended, the old speak() promise
+// hangs, and two TTS streams can overlap on the next turn.
+function killCurrentSpeech() {
+  if (currentAudio) {
+    try { currentAudio.pause(); } catch {}
+    currentAudio.onended = null;
+    currentAudio.onerror = null;
+    currentAudio.ontimeupdate = null;
+    currentAudio.onplaying = null;
+    currentAudio = null;
+  }
+  if (currentSpeakResolve) {
+    const r = currentSpeakResolve;
+    currentSpeakResolve = null;
+    r();
+  }
+}
 
 async function sendTurn(text) {
+  if (turnInFlight) return;
   if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
   const userText = text.trim();
   if (!userText) return;
 
+  turnInFlight = true;
   stopRec();
   finalTranscript = "";
   partialTranscript = "";
@@ -411,6 +617,7 @@ async function sendTurn(text) {
     setCaption("error", `Error: ${err.message || err}`);
     setTimeout(() => setCaption(null), 4000);
   } finally {
+    turnInFlight = false;
     currentAudio = null;
     if (!muted) {
       setState(STATE.LISTENING);
@@ -420,10 +627,7 @@ async function sendTurn(text) {
 }
 
 function interruptAI() {
-  if (currentAudio) {
-    try { currentAudio.pause(); } catch {}
-    currentAudio = null;
-  }
+  killCurrentSpeech();
   setCaption(null);
   setState(STATE.USER_SPEAKING);
   finalTranscript = "";
@@ -473,10 +677,33 @@ async function chat(text) {
 
 async function speak(text) {
   if (!text) return;
+  // Ensure no prior TTS is still in-flight.
+  killCurrentSpeech();
+
+  // Pull shape cues out of the reply and remember roughly where each sits
+  // in the spoken word stream, so we can fire the morph in time with the
+  // voice. The cleaned text (tags removed) is what we display and play.
+  const cues = [];
+  const cleanWords = [];
+  const tokens = text.split(/(<shape\s+type="[^"]*"\s*\/>)/g);
+  for (const tok of tokens) {
+    if (!tok) continue;
+    const m = tok.match(/^<shape\s+type="([^"]*)"\s*\/>$/);
+    if (m) {
+      cues.push({ shape: m[1], atWord: cleanWords.length });
+    } else {
+      for (const w of tok.split(/\s+/)) {
+        if (w) cleanWords.push(w);
+      }
+    }
+  }
+  const cleanText = cleanWords.join(" ");
+  if (!cleanText) return;
+
   const res = await fetch("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text: cleanText }),
   });
   if (!res.ok) throw new Error(`tts ${res.status}`);
   const blob = await res.blob();
@@ -487,9 +714,9 @@ async function speak(text) {
   // Rolling subtitle: the caption only ever shows the last few words the
   // bot is actively speaking. Older words fall off the left, new ones
   // slide in on the right, and the whole thing fades out when audio ends.
-  const words = text.split(/\s+/).filter(Boolean);
   const WINDOW = 3;
   let lastShown = -1;
+  let cueIdx = 0;
 
   const pulseCaption = () => {
     captionEl.classList.remove("pulse");
@@ -499,27 +726,34 @@ async function speak(text) {
   };
 
   return new Promise((resolve) => {
+    currentSpeakResolve = resolve;
+    const finish = () => {
+      if (currentSpeakResolve === resolve) currentSpeakResolve = null;
+      if (currentAudio === audio) currentAudio = null;
+      URL.revokeObjectURL(url);
+      resolve();
+    };
     audio.onplaying = () => {
       setState(STATE.AI_SPEAKING);
     };
     audio.ontimeupdate = () => {
       if (!audio.duration || !isFinite(audio.duration)) return;
       const frac = Math.min(1, audio.currentTime / audio.duration);
-      const n = Math.max(1, Math.ceil(frac * words.length));
+      const n = Math.max(1, Math.ceil(frac * cleanWords.length));
       if (n !== lastShown) {
         lastShown = n;
         const start = Math.max(0, n - WINDOW);
-        setCaption("bot", words.slice(start, n).join(" "));
+        setCaption("bot", cleanWords.slice(start, n).join(" "));
         pulseCaption();
       }
+      while (cueIdx < cues.length && n >= cues[cueIdx].atWord) {
+        morphTo(cues[cueIdx].shape);
+        cueIdx++;
+      }
     };
-    audio.onended = () => {
-      setCaption(null);
-      URL.revokeObjectURL(url);
-      resolve();
-    };
-    audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.play().catch(() => resolve());
+    audio.onended = () => { setCaption(null); finish(); };
+    audio.onerror = () => { finish(); };
+    audio.play().catch(() => finish());
   });
 }
 
@@ -540,7 +774,7 @@ function toggleMute() {
     micBtn.setAttribute("aria-pressed", "false");
     micBtn.classList.remove("active");
     stopRec();
-    if (currentAudio) { try { currentAudio.pause(); } catch {} currentAudio = null; }
+    killCurrentSpeech();
     setState(STATE.MUTED);
     setCaption(null);
   } else {
